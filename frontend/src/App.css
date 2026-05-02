@@ -32,15 +32,11 @@
   /* no interactive elements — inherits drag from parent */
 }
 
-.titlebar-logo svg {
-  color: var(--primary);
-}
-
-.titlebar-title {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--text);
+.titlebar-logo-img {
+  height: 26px;
+  width: auto;
+  display: block;
+  object-fit: contain;
 }
 
 .titlebar-nav {

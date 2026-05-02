@@ -13,7 +13,8 @@ import {
   OpenURL,
 } from '../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
-import { GitBranch, FolderOpen, X, TerminalSquare, ChevronDown } from 'lucide-react'
+import { FolderOpen, X, TerminalSquare, ChevronDown } from 'lucide-react'
+import logo from './assets/images/skilltree_logo.png'
 
 function App() {
   const {
@@ -131,8 +132,7 @@ function App() {
     <div className="app">
       <header className="titlebar">
         <div className="titlebar-logo">
-          <GitBranch size={16} />
-          <span className="titlebar-title">Skilltree</span>
+          <img src={logo} alt="Skilltree" className="titlebar-logo-img" />
         </div>
 
         <nav className="titlebar-nav">

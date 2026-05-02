@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch: # allow manual trigger for testing builds
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13          # Intel
+            platform: darwin/amd64
+            artifact: Skilltree-macOS-Intel.zip
+          - os: macos-14          # Apple Silicon
+            platform: darwin/arm64
+            artifact: Skilltree-macOS-AppleSilicon.zip
+          - os: windows-latest
+            platform: windows/amd64
+            artifact: Skilltree-Windows-x64.zip
+          - os: ubuntu-22.04
+            platform: linux/amd64
+            artifact: Skilltree-Linux-x64.tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.0-dev \
+            build-essential \
+            pkg-config
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Build
+        run: wails build -platform ${{ matrix.platform }} -trimpath
+
+      # macOS — zip the .app bundle
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd build/bin
+          zip -r "$GITHUB_WORKSPACE/${{ matrix.artifact }}" Skilltree.app
+
+      # Windows — zip the .exe
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "build\bin\skilltree.exe" `
+            -DestinationPath "${{ matrix.artifact }}"
+
+      # Linux — tar.gz the binary
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          tar -czf "${{ matrix.artifact }}" -C build/bin skilltree
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    # Only publish a release when triggered by a tag push
+    if: startsWith(github.ref, 'refs/tags/')
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Skilltree-macOS-Intel.zip
+            Skilltree-macOS-AppleSilicon.zip
+            Skilltree-Windows-x64.zip
+            Skilltree-Linux-x64.tar.gz
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

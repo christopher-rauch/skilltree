@@ -133,6 +133,7 @@ function App() {
       <header className="titlebar">
         <div className="titlebar-logo">
           <img src={logo} alt="Skilltree" className="titlebar-logo-img" />
+          <span className="titlebar-title">Skilltree</span>
         </div>
 
         <nav className="titlebar-nav">

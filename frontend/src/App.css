@@ -1,0 +1,272 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--bg);
+}
+
+/* ---- Titlebar / Header ---- */
+.titlebar {
+  display: flex;
+  align-items: stretch; /* children fill full 48px height */
+  gap: 12px;
+  height: 48px;
+  padding: 0 16px 0 80px; /* 80px for macOS traffic lights */
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  --wails-draggable: drag;
+  cursor: default;
+  user-select: none;
+}
+
+.titlebar * {
+  user-select: none;
+  cursor: default;
+}
+
+.titlebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* no interactive elements — inherits drag from parent */
+}
+
+.titlebar-logo svg {
+  color: var(--primary);
+}
+
+.titlebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.titlebar-nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 20px;
+  /* container inherits drag — buttons individually opt out */
+}
+
+.nav-btn {
+  padding: 5px 14px;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.15s;
+  --wails-draggable: no-drag;
+  cursor: pointer;
+}
+
+.nav-btn:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.nav-btn.active {
+  background: var(--primary-ghost);
+  color: var(--primary);
+}
+
+.titlebar-spacer {
+  flex: 1;
+  --wails-draggable: drag;
+}
+
+.titlebar-project {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* path text is non-interactive — inherits drag; button opts out below */
+}
+
+.titlebar-project .btn-ghost {
+  --wails-draggable: no-drag;
+  cursor: pointer;
+}
+
+.project-path {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-size: 12px;
+  font-family: var(--mono);
+}
+
+/* ---- Content + terminal wrapper ---- */
+.content-with-terminal {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Main content ---- */
+.main-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+}
+
+/* ---- Terminal panel ---- */
+.terminal-resize-handle {
+  height: 4px;
+  flex-shrink: 0;
+  background: var(--border);
+  cursor: ns-resize;
+  transition: background 0.15s;
+}
+
+.terminal-resize-handle:hover {
+  background: var(--primary);
+}
+
+.terminal-panel {
+  display: flex;
+  flex-direction: column;
+  background: #0a0a0a;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  min-height: 120px;
+  max-height: 600px;
+}
+
+.terminal-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  height: 32px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.terminal-alive-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 4px var(--primary);
+}
+
+.terminal-header-gap {
+  flex: 1;
+}
+
+.terminal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--text-3);
+}
+
+.terminal-body {
+  flex: 1;
+  overflow: hidden;
+}
+
+.terminal-toggle.active {
+  color: var(--primary);
+}
+
+/* ---- Buttons ---- */
+.btn-primary,
+.btn-secondary,
+.btn-ghost,
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #000;
+  font-weight: 600;
+  padding: 6px 14px;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-dim);
+}
+
+.btn-secondary {
+  background: var(--surface-3);
+  color: var(--text);
+  padding: 6px 14px;
+  border: 1px solid var(--border-2);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--text-3);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-2);
+  padding: 5px 10px;
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: var(--red-ghost);
+  color: var(--red);
+  padding: 6px 14px;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--red);
+  color: #fff;
+}
+
+/* ---- Toast/Error bar ---- */
+.error-bar {
+  background: var(--red-ghost);
+  border-bottom: 1px solid var(--red);
+  color: var(--red);
+  padding: 8px 16px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ---- Empty state ---- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-3);
+  padding: 48px;
+  text-align: center;
+}
+
+.empty-state svg {
+  opacity: 0.3;
+}
+
+.empty-state p {
+  font-size: 13px;
+  color: var(--text-2);
+}

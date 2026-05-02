@@ -1,0 +1,61 @@
+.skill-node {
+  background: var(--surface-2);
+  border: 1.5px solid var(--border-2);
+  border-radius: 10px;
+  width: 100%;
+  height: 100%;
+  min-width: 160px;
+  min-height: 44px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.skill-node:hover {
+  border-color: var(--text-3);
+}
+
+.skill-node.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-ghost);
+}
+
+.node-body {
+  padding: 12px 14px;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.node-name {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: subpixel-antialiased;
+}
+
+.node-desc {
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.4;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: subpixel-antialiased;
+}
+
+/* Handle hover — applied via React Flow's .react-flow__handle selector */
+.react-flow__handle:hover {
+  background: var(--primary) !important;
+  border-color: var(--primary) !important;
+}

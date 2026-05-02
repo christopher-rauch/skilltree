@@ -1,0 +1,29 @@
+.scope-project-info {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.scope-project-name {
+  font-family: var(--mono);
+  color: var(--primary);
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scope-no-project {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.scope-inline-icon {
+  display: inline;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}

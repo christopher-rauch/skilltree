@@ -1,0 +1,28 @@
+.github-btn {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--text-3);
+  font-size: 11px;
+  font-family: var(--mono);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  text-align: left;
+}
+
+.github-btn:hover {
+  color: var(--text);
+  background: var(--surface-3);
+}
+
+.github-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}

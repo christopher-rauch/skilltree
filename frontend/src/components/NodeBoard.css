@@ -1,0 +1,510 @@
+.node-board {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---- Palette ---- */
+.skill-palette {
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.palette-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 12px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.palette-hint {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.palette-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.palette-empty {
+  padding: 20px 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.palette-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  cursor: grab;
+  transition: background 0.1s;
+  border: 1px solid transparent;
+}
+
+.palette-item:hover {
+  background: var(--surface-3);
+  border-color: var(--border-2);
+}
+
+.palette-item:active {
+  cursor: grabbing;
+}
+
+.palette-item-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.palette-badge {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  margin-left: 6px;
+}
+
+.palette-badge.global {
+  background: var(--primary-ghost);
+  color: var(--primary);
+}
+
+.palette-badge.project {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--amber);
+}
+
+/* ---- Canvas area ---- */
+.canvas-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* ---- Toolbar ---- */
+.board-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  position: relative;
+}
+
+.flow-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text);
+  position: relative;
+  user-select: none;
+  min-width: 140px;
+}
+
+.flow-selector:hover {
+  border-color: var(--text-3);
+}
+
+.flow-selector-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 200px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  z-index: 50;
+  padding: 4px;
+}
+
+.flow-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-2);
+  transition: background 0.1s;
+}
+
+.flow-dropdown-item:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.flow-dropdown-item.active {
+  color: var(--primary);
+}
+
+.flow-dropdown-empty {
+  padding: 12px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.flow-name-input {
+  width: 180px;
+  padding: 5px 10px;
+  font-size: 13px;
+  background: transparent;
+  border: 1px solid var(--border-2);
+  color: var(--text);
+}
+
+.flow-name-input:focus {
+  background: var(--surface-3);
+  border-color: var(--primary);
+}
+
+.toolbar-gap {
+  flex: 1;
+}
+
+.flow-warning {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.flow-warning-icon {
+  color: var(--red);
+  display: block;
+  cursor: default;
+}
+
+.flow-warning-tooltip {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface-2);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--red);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 50;
+  box-shadow: var(--shadow);
+}
+
+.flow-warning-tooltip::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 5px solid var(--red);
+}
+
+.flow-warning:hover .flow-warning-tooltip {
+  display: block;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.toolbar-btn.dirty {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.save-btn .save-icon,
+.save-btn .check-icon {
+  display: flex;
+  align-items: center;
+  transition: opacity 0.2s, transform 0.2s;
+}
+
+.save-btn .save-icon {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.save-btn .save-icon.hidden {
+  opacity: 0;
+  transform: scale(0.5);
+  position: absolute;
+}
+
+.save-btn .check-icon {
+  opacity: 0;
+  transform: scale(0.5);
+  position: absolute;
+}
+
+.save-btn .check-icon.visible {
+  opacity: 1;
+  transform: scale(1);
+  position: relative;
+}
+
+.save-btn.saved {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.toolbar-btn.danger:hover {
+  color: var(--red);
+  background: var(--red-ghost);
+}
+
+/* ---- React Flow wrapper ---- */
+.rf-wrapper {
+  flex: 1;
+  position: relative;
+  background: var(--bg);
+}
+
+/* Override React Flow colors */
+.react-flow__background {
+  background: var(--bg) !important;
+}
+
+/* Prevent WebKit from rasterising the transform pane at a fixed resolution,
+   which causes blurry text when zoomed in. */
+.react-flow__transformationpane {
+  will-change: unset !important;
+}
+
+.rf-controls .react-flow__controls {
+  background: var(--surface-2);
+  border-color: var(--border-2);
+}
+
+.react-flow__controls-button {
+  background: var(--surface-2) !important;
+  border-color: var(--border-2) !important;
+  color: var(--text-2) !important;
+  fill: var(--text-2) !important;
+}
+
+.react-flow__controls-button:hover {
+  background: var(--surface-3) !important;
+}
+
+.rf-minimap-panel {
+  margin: 0 8px 8px 0;
+}
+
+.rf-minimap-svg {
+  display: block;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  cursor: crosshair;
+}
+
+.react-flow__edge-path {
+  stroke: var(--primary);
+  stroke-width: 1.5;
+}
+
+.react-flow__arrowhead polyline {
+  stroke: var(--primary);
+  fill: var(--primary);
+}
+
+.no-flow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  height: 100%;
+  color: var(--text-3);
+}
+
+.no-flow p {
+  font-size: 14px;
+}
+
+.canvas-hint {
+  background: var(--surface-2);
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  font-size: 12px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+/* Reuse modal styles from SkillManager */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(4px);
+}
+
+.modal-dialog {
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: 400px;
+  box-shadow: var(--shadow);
+}
+
+.modal-dialog h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.modal-dialog p {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 20px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.export-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 4px;
+}
+
+.editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.editor-field input {
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.scope-selector {
+  display: flex;
+  gap: 8px;
+}
+
+.scope-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 12px;
+  border: 1px solid var(--border-2);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+
+.scope-opt:hover {
+  border-color: var(--text-3);
+  color: var(--text);
+}
+
+.scope-opt.active {
+  background: var(--primary-ghost);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+/* ---- Edge context menu ---- */
+.edge-context-menu {
+  position: fixed;
+  z-index: 200;
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-lg);
+  padding: 4px;
+  min-width: 170px;
+  box-shadow: var(--shadow);
+}
+
+.edge-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+
+.edge-menu-item:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.edge-menu-item.danger:hover {
+  background: var(--red-ghost);
+  color: var(--red);
+}
+
+.edge-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 3px 0;
+}

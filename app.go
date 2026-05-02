@@ -1,0 +1,597 @@
+package main
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"maps"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"gopkg.in/yaml.v3"
+)
+
+type App struct {
+	ctx        context.Context
+	projectDir string
+	boardDirty bool
+	mcpPort    int
+	term       termState
+}
+
+func NewApp() *App {
+	return &App{}
+}
+
+func (a *App) startup(ctx context.Context) {
+	a.ctx = ctx
+	port, err := startMCPServer(a)
+	if err == nil {
+		a.mcpPort = port
+	}
+}
+
+func (a *App) SetBoardDirty(dirty bool) {
+	a.boardDirty = dirty
+}
+
+func (a *App) OpenURL(url string) {
+	runtime.BrowserOpenURL(a.ctx, url)
+}
+
+func (a *App) beforeClose(ctx context.Context) bool {
+	if !a.boardDirty {
+		return false // allow close
+	}
+	result, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
+		Type:          runtime.QuestionDialog,
+		Title:         "Unsaved changes",
+		Message:       "The node board has unsaved changes. Quit anyway?",
+		Buttons:       []string{"Quit", "Cancel"},
+		DefaultButton: "Cancel",
+		CancelButton:  "Cancel",
+	})
+	if err != nil {
+		return false
+	}
+	return result != "Quit" // true = cancel the close
+}
+
+// --- Data types ---
+
+type Skill struct {
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	ArgumentHint string `json:"argumentHint"`
+	AllowedTools string `json:"allowedTools"`
+	Body         string `json:"body"`
+	Scope        string `json:"scope"` // "global" | "project"
+}
+
+type skillFrontmatter struct {
+	Name         string `yaml:"name"`
+	Description  string `yaml:"description"`
+	ArgumentHint string `yaml:"argument-hint,omitempty"`
+	AllowedTools string `yaml:"allowed-tools,omitempty"`
+}
+
+type XYPosition struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+type FlowNode struct {
+	ID       string         `json:"id"`
+	Type     string         `json:"type"`
+	Position XYPosition     `json:"position"`
+	Data     map[string]any `json:"data"`
+	Width    float64        `json:"width,omitempty"`
+	Height   float64        `json:"height,omitempty"`
+}
+
+type FlowEdge struct {
+	ID           string `json:"id"`
+	Source       string `json:"source"`
+	Target       string `json:"target"`
+	SourceHandle string `json:"sourceHandle,omitempty"`
+	TargetHandle string `json:"targetHandle,omitempty"`
+	Animated     bool   `json:"animated"`
+}
+
+type Flow struct {
+	ID          string     `json:"id"`
+	Name        string     `json:"name"`
+	Description string     `json:"description"`
+	ContentHash string     `json:"contentHash"`
+	Nodes       []FlowNode `json:"nodes"`
+	Edges       []FlowEdge `json:"edges"`
+}
+
+// flowContentHash hashes skill names + edge topology (ignores node positions).
+func flowContentHash(flow Flow) string {
+	type edge struct{ S, T string }
+	var names []string
+	nameOf := map[string]string{}
+	for _, n := range flow.Nodes {
+		s, _ := n.Data["skillName"].(string)
+		nameOf[n.ID] = s
+		names = append(names, s)
+	}
+	sort.Strings(names)
+
+	var edges []edge
+	for _, e := range flow.Edges {
+		edges = append(edges, edge{nameOf[e.Source], nameOf[e.Target]})
+	}
+	sort.Slice(edges, func(i, j int) bool {
+		if edges[i].S != edges[j].S {
+			return edges[i].S < edges[j].S
+		}
+		return edges[i].T < edges[j].T
+	})
+
+	data, _ := json.Marshal(map[string]any{"nodes": names, "edges": edges})
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum[:8])
+}
+
+// --- Path helpers ---
+
+func globalSkillsDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "skills")
+}
+
+func (a *App) projectSkillsDir() string {
+	if a.projectDir == "" {
+		return ""
+	}
+	return filepath.Join(a.projectDir, ".claude", "skills")
+}
+
+func flowsDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "skilltree", "flows")
+}
+
+// --- Skill file I/O ---
+
+func parseSkillFile(path string, scope string) (Skill, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return Skill{}, err
+	}
+
+	content := string(data)
+	var fm skillFrontmatter
+	var body string
+
+	if strings.HasPrefix(content, "---") {
+		rest := content[3:]
+		if fmContent, remainder, ok := strings.Cut(rest, "\n---"); ok {
+			if err := yaml.Unmarshal([]byte(fmContent), &fm); err != nil {
+				return Skill{}, fmt.Errorf("parse frontmatter: %w", err)
+			}
+			body = strings.TrimSpace(remainder)
+		} else {
+			body = strings.TrimSpace(content)
+		}
+	} else {
+		body = strings.TrimSpace(content)
+	}
+
+	return Skill{
+		Name:         fm.Name,
+		Description:  fm.Description,
+		ArgumentHint: fm.ArgumentHint,
+		AllowedTools: fm.AllowedTools,
+		Body:         body,
+		Scope:        scope,
+	}, nil
+}
+
+func loadSkillsFromDir(dir string, scope string) ([]Skill, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []Skill{}, nil
+		}
+		return nil, err
+	}
+
+	var skills []Skill
+	for _, entry := range entries {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		skillPath := filepath.Join(dir, entry.Name(), "SKILL.md")
+		skill, err := parseSkillFile(skillPath, scope)
+		if err != nil {
+			continue
+		}
+		skills = append(skills, skill)
+	}
+
+	sort.Slice(skills, func(i, j int) bool {
+		return skills[i].Name < skills[j].Name
+	})
+
+	return skills, nil
+}
+
+func writeSkillFile(dir string, skill Skill) error {
+	skillDir := filepath.Join(dir, skill.Name)
+	if err := os.MkdirAll(skillDir, 0755); err != nil {
+		return err
+	}
+
+	fm := skillFrontmatter{
+		Name:        skill.Name,
+		Description: skill.Description,
+	}
+	if skill.ArgumentHint != "" {
+		fm.ArgumentHint = skill.ArgumentHint
+	}
+	if skill.AllowedTools != "" {
+		fm.AllowedTools = skill.AllowedTools
+	}
+
+	fmBytes, err := yaml.Marshal(fm)
+	if err != nil {
+		return err
+	}
+
+	content := fmt.Sprintf("---\n%s---\n\n%s\n", string(fmBytes), skill.Body)
+	return os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(content), 0644)
+}
+
+// --- Exported skill methods ---
+
+func (a *App) GetGlobalSkills() ([]Skill, error) {
+	return loadSkillsFromDir(globalSkillsDir(), "global")
+}
+
+func (a *App) GetProjectSkills() ([]Skill, error) {
+	dir := a.projectSkillsDir()
+	if dir == "" {
+		return []Skill{}, nil
+	}
+	return loadSkillsFromDir(dir, "project")
+}
+
+func (a *App) GetProjectDir() string {
+	return a.projectDir
+}
+
+func (a *App) OpenProjectDirectory() (string, error) {
+	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select Project Directory",
+	})
+	if err != nil {
+		return "", err
+	}
+	if dir != "" {
+		a.projectDir = dir
+	}
+	return dir, nil
+}
+
+func (a *App) SaveSkill(skill Skill, originalName string) error {
+	var dir string
+	if skill.Scope == "global" {
+		dir = globalSkillsDir()
+	} else {
+		dir = a.projectSkillsDir()
+		if dir == "" {
+			return fmt.Errorf("no project directory set — open a project first")
+		}
+	}
+
+	// If renaming, remove the old directory
+	if originalName != "" && originalName != skill.Name {
+		_ = os.RemoveAll(filepath.Join(dir, originalName))
+	}
+
+	return writeSkillFile(dir, skill)
+}
+
+func (a *App) DeleteSkill(name string, scope string) error {
+	var dir string
+	if scope == "global" {
+		dir = globalSkillsDir()
+	} else {
+		dir = a.projectSkillsDir()
+		if dir == "" {
+			return fmt.Errorf("no project directory set")
+		}
+	}
+	return os.RemoveAll(filepath.Join(dir, name))
+}
+
+// --- Exported flow methods ---
+
+func (a *App) GetFlows() ([]Flow, error) {
+	dir := flowsDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []Flow{}, nil
+		}
+		return nil, err
+	}
+
+	var flows []Flow
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			continue
+		}
+		var flow Flow
+		if err := json.Unmarshal(data, &flow); err != nil {
+			continue
+		}
+		flows = append(flows, flow)
+	}
+
+	sort.Slice(flows, func(i, j int) bool {
+		return flows[i].Name < flows[j].Name
+	})
+
+	return flows, nil
+}
+
+func (a *App) SaveFlow(flow Flow) error {
+	dir := flowsDir()
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	// Recompute content hash; clear description if content changed
+	newHash := flowContentHash(flow)
+	if newHash != flow.ContentHash {
+		flow.ContentHash = newHash
+		flow.Description = "" // will be regenerated
+	}
+
+	data, err := json.MarshalIndent(flow, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, flow.ID+".json"), data, 0644)
+}
+
+func (a *App) DeleteFlow(id string) error {
+	return os.Remove(filepath.Join(flowsDir(), id+".json"))
+}
+
+func (a *App) NewFlowID() string {
+	return fmt.Sprintf("flow-%d", time.Now().UnixMilli())
+}
+
+// ClaudeAvailable returns true if the claude CLI is reachable.
+func (a *App) ClaudeAvailable() bool {
+	_, err := shellWhich("claude")
+	return err == nil
+}
+
+var ansiRE = regexp.MustCompile(`\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])`)
+
+// GenerateFlowDescriptions generates missing descriptions for all flows that
+// have no description, using claude -p in non-interactive mode. Runs the
+// generations concurrently and emits "flow:description_updated" events.
+func (a *App) GenerateFlowDescriptions() {
+	if !a.ClaudeAvailable() {
+		return
+	}
+	flows, err := a.GetFlows()
+	if err != nil {
+		return
+	}
+	for _, f := range flows {
+		if f.Description != "" || len(f.Nodes) == 0 {
+			continue
+		}
+		go func(flow Flow) {
+			desc, err := generateDescription(flow)
+			if err != nil || desc == "" {
+				return
+			}
+			flow.Description = desc
+			// Persist without clearing description (hash unchanged)
+			dir := flowsDir()
+			data, err := json.MarshalIndent(flow, "", "  ")
+			if err != nil {
+				return
+			}
+			_ = os.WriteFile(filepath.Join(dir, flow.ID+".json"), data, 0644)
+			runtime.EventsEmit(a.ctx, "flow:description_updated", map[string]string{
+				"id": flow.ID, "description": desc,
+			})
+		}(f)
+	}
+}
+
+func generateDescription(flow Flow) (string, error) {
+	var skillNames []string
+	for _, n := range flow.Nodes {
+		if s, ok := n.Data["skillName"].(string); ok && s != "" {
+			skillNames = append(skillNames, s)
+		}
+	}
+	sort.Strings(skillNames)
+
+	prompt := fmt.Sprintf(
+		"In one sentence (max 100 characters), describe what this workflow accomplishes "+
+			"based on its name and the skills it chains together. "+
+			"Reply with ONLY the description — no quotes, no period at the end.\n\n"+
+			"Workflow name: %s\nSkills: %s\nConnections: %d",
+		flow.Name, strings.Join(skillNames, ", "), len(flow.Edges),
+	)
+
+	claudePath, err := shellWhich("claude")
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.Command(claudePath, "-p", prompt).Output()
+	if err != nil {
+		return "", err
+	}
+	clean := ansiRE.ReplaceAllString(strings.TrimSpace(string(out)), "")
+	// Take only the first line in case claude outputs extra lines
+	if idx := strings.Index(clean, "\n"); idx >= 0 {
+		clean = clean[:idx]
+	}
+	return strings.TrimSpace(clean), nil
+}
+
+// GenerateFlowSkill converts a flow into a new SKILL.md.
+// Nodes at the same topological level (all parents completed) are emitted as
+// a concurrent phase; nodes that must wait for prior work run sequentially.
+func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error {
+	nodeMap := make(map[string]FlowNode)
+	inDegree := make(map[string]int)
+	adj := make(map[string][]string)   // source → targets
+	parents := make(map[string][]string) // target → sources
+
+	for _, node := range flow.Nodes {
+		nodeMap[node.ID] = node
+		inDegree[node.ID] = 0
+	}
+	for _, edge := range flow.Edges {
+		adj[edge.Source] = append(adj[edge.Source], edge.Target)
+		parents[edge.Target] = append(parents[edge.Target], edge.Source)
+		inDegree[edge.Target]++
+	}
+
+	// Assign each node the deepest level it can be placed at:
+	// level[n] = max(level[parent] for all parents) + 1
+	level := make(map[string]int)
+	queue := []string{}
+	for nodeID, deg := range inDegree {
+		if deg == 0 {
+			queue = append(queue, nodeID)
+			level[nodeID] = 0
+		}
+	}
+	sort.Strings(queue)
+
+	maxLevel := 0
+	remaining := maps.Clone(inDegree)
+
+	for len(queue) > 0 {
+		curr := queue[0]
+		queue = queue[1:]
+		if level[curr] > maxLevel {
+			maxLevel = level[curr]
+		}
+		next := append([]string{}, adj[curr]...)
+		sort.Strings(next)
+		for _, nxt := range next {
+			if level[curr]+1 > level[nxt] {
+				level[nxt] = level[curr] + 1
+			}
+			remaining[nxt]--
+			if remaining[nxt] == 0 {
+				queue = append(queue, nxt)
+			}
+		}
+	}
+
+	// Group nodes by level
+	phases := make([][]FlowNode, maxLevel+1)
+	for _, node := range flow.Nodes {
+		l := level[node.ID]
+		phases[l] = append(phases[l], node)
+	}
+	// Sort nodes within each phase for determinism
+	for i := range phases {
+		sort.Slice(phases[i], func(a, b int) bool {
+			la, _ := phases[i][a].Data["label"].(string)
+			lb, _ := phases[i][b].Data["label"].(string)
+			if la == "" {
+				la, _ = phases[i][a].Data["skillName"].(string)
+			}
+			if lb == "" {
+				lb, _ = phases[i][b].Data["skillName"].(string)
+			}
+			return la < lb
+		})
+	}
+
+	totalNodes := len(flow.Nodes)
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "# Workflow: %s\n\n", flow.Name)
+	sb.WriteString("Execute the phases below in order. Within each phase, all listed skills ")
+	sb.WriteString("can be run **concurrently** — start them in parallel and wait for all ")
+	sb.WriteString("to finish before advancing to the next phase.\n\n")
+	sb.WriteString("Pass all relevant context and outputs forward at each phase boundary.\n\n")
+
+	phaseNum := 1
+	for _, nodes := range phases {
+		if len(nodes) == 0 {
+			continue
+		}
+
+		// Collect the names of all phases that feed into this one
+		depPhaseNums := map[int]struct{}{}
+		for _, node := range nodes {
+			for _, parentID := range parents[node.ID] {
+				depPhaseNums[level[parentID]+1] = struct{}{}
+			}
+		}
+
+		fmt.Fprintf(&sb, "---\n\n## Phase %d", phaseNum)
+		if len(nodes) > 1 {
+			sb.WriteString(" *(concurrent)*")
+		}
+		sb.WriteString("\n\n")
+
+		if len(depPhaseNums) > 0 {
+			nums := []int{}
+			for n := range depPhaseNums {
+				nums = append(nums, n)
+			}
+			sort.Ints(nums)
+			parts := make([]string, len(nums))
+			for i, n := range nums {
+				parts[i] = fmt.Sprintf("Phase %d", n)
+			}
+			fmt.Fprintf(&sb, "_Requires: %s to be complete._\n\n", strings.Join(parts, ", "))
+		}
+
+		for _, node := range nodes {
+			sName, _ := node.Data["skillName"].(string)
+			label, _ := node.Data["label"].(string)
+			desc, _ := node.Data["description"].(string)
+			if label == "" {
+				label = sName
+			}
+			fmt.Fprintf(&sb, "### %s\n\n", label)
+			if desc != "" {
+				fmt.Fprintf(&sb, "> %s\n\n", desc)
+			}
+			fmt.Fprintf(&sb, "Invoke `/%s`.\n\n", sName)
+		}
+
+		phaseNum++
+	}
+
+	generated := Skill{
+		Name:        skillName,
+		Description: fmt.Sprintf("Workflow: %s (%d nodes, %d phases)", flow.Name, totalNodes, phaseNum-1),
+		Body:        sb.String(),
+		Scope:       scope,
+	}
+
+	return a.SaveSkill(generated, "")
+}

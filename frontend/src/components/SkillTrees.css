@@ -1,0 +1,263 @@
+.skilltrees-page {
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  padding: 32px 36px;
+  background: var(--bg);
+}
+
+.skilltrees-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 32px;
+}
+
+.skilltrees-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+.skilltrees-subtitle {
+  font-size: 13px;
+  color: var(--text-3);
+  margin-top: 3px;
+}
+
+/* ---- Empty state ---- */
+.trees-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 80px 24px;
+  color: var(--text-3);
+  text-align: center;
+}
+
+.trees-empty svg {
+  opacity: 0.2;
+}
+
+.trees-empty p {
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+/* ---- Grid ---- */
+.trees-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+/* ---- Card ---- */
+.flow-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: border-color 0.15s;
+}
+
+.flow-card:hover {
+  border-color: var(--border-2);
+}
+
+.flow-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.flow-card-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.01em;
+}
+
+.flow-card-description {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.flow-card-stats {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.flow-card-stats span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge-concurrent {
+  background: rgba(245, 158, 11, 0.12);
+  color: var(--amber);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* ---- Node chips ---- */
+.flow-card-nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 28px;
+}
+
+.flow-node-chip {
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.flow-node-chip.muted {
+  color: var(--text-3);
+  border-style: dashed;
+}
+
+.flow-card-empty {
+  font-size: 12px;
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* ---- Card actions ---- */
+.flow-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+  margin-top: auto;
+}
+
+.flow-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  padding: 5px 10px;
+}
+
+.flow-action-btn.danger:hover {
+  color: var(--red);
+  background: var(--red-ghost);
+}
+
+.flow-card-actions .btn-primary {
+  margin-left: auto;
+}
+
+/* ---- Reuse modal styles ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  backdrop-filter: blur(4px);
+}
+
+.modal-dialog {
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: 400px;
+  box-shadow: var(--shadow);
+}
+
+.modal-dialog h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.modal-dialog p {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 20px;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+
+.export-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.editor-field input {
+  padding: 8px 10px;
+  width: 100%;
+}
+
+.scope-selector {
+  display: flex;
+  gap: 8px;
+}
+
+.scope-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 12px;
+  border: 1px solid var(--border-2);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+
+.scope-opt:hover {
+  border-color: var(--text-3);
+  color: var(--text);
+}
+
+.scope-opt.active {
+  background: var(--primary-ghost);
+  color: var(--primary);
+  border-color: var(--primary);
+}

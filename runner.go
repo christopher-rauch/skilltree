@@ -232,6 +232,48 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 
 	var runErr error
 	switch node.Type {
+	case "block-mcp":
+		serverName, _ := node.Data["serverName"].(string)
+		toolName, _ := node.Data["toolName"].(string)
+		responseVar, _ := node.Data["responseVar"].(string)
+		if responseVar == "" {
+			responseVar = "mcp_response"
+		}
+		if serverName == "" || toolName == "" {
+			a.emitTerminal("\x1b[33m⚠ Server or tool name not set — skipping\x1b[0m\r\n")
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		}
+
+		// Build args map from key/value pairs, applying variable substitution
+		mcpArgs := map[string]interface{}{}
+		if argList, ok := node.Data["args"].([]interface{}); ok {
+			for _, item := range argList {
+				if entry, ok := item.(map[string]interface{}); ok {
+					name, _ := entry["name"].(string)
+					value, _ := entry["value"].(string)
+					if name != "" {
+						mcpArgs[sub(name)] = sub(value)
+					}
+				}
+			}
+		}
+
+		a.emitTerminal(fmt.Sprintf("\x1b[2m  %s → %s\x1b[0m\r\n", serverName, toolName))
+		result, err := a.InvokeMCPTool(serverName, toolName, mcpArgs)
+		if err != nil {
+			a.emitTerminal(fmt.Sprintf("\x1b[31m✗ MCP error: %s\x1b[0m\r\n", err.Error()))
+			runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+			return
+		}
+		a.emitTerminal(result + "\r\n")
+		varsMu.Lock()
+		vars[responseVar] = result
+		varsMu.Unlock()
+		a.emitTerminal(fmt.Sprintf("\x1b[2m  stored in {{%s}}\x1b[0m\r\n", responseVar))
+		runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+		return
+
 	case "block-gate":
 		message, _ := node.Data["message"].(string)
 		if message == "" {

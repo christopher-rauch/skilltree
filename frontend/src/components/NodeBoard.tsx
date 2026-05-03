@@ -26,7 +26,7 @@ import { useStore } from '../store'
 import { Flow, FlowNode, FlowEdge } from '../types'
 import { SkillNode } from './SkillNode'
 import { AnnotationTextNode, AnnotationStickyNode, AnnotationDrawingNode } from './AnnotationNodes'
-import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode, OutputCaptureNode, HttpRequestNode, ApprovalGateNode } from './BuildingBlockNodes'
+import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode, OutputCaptureNode, HttpRequestNode, ApprovalGateNode, MCPToolNode } from './BuildingBlockNodes'
 import {
   SaveFlow,
   DeleteFlow,
@@ -59,6 +59,7 @@ const nodeTypes = {
   'block-output':    OutputCaptureNode,
   'block-http':      HttpRequestNode,
   'block-gate':      ApprovalGateNode,
+  'block-mcp':       MCPToolNode,
 }
 
 export const BadgeContext = createContext<Map<string, string>>(new Map())
@@ -579,6 +580,7 @@ export function NodeBoard({ onRefresh }: Props) {
           output:   { label: 'Output Capture',   height: 110, data: { destination: 'file', filePath: '' } },
           http:     { label: 'HTTP Request',     height: 160, data: { method: 'GET', url: '', headers: [], body: '', responseVar: 'http_response', showHeaders: false } },
           gate:     { label: 'Approval Gate',   height: 130, data: { message: '' } },
+          mcp:      { label: 'MCP Tool',        height: 180, data: { serverName: '', toolName: '', args: [], responseVar: 'mcp_response' } },
         }
         const def = defaults[blockType] ?? defaults.text
         setNodes((nds) => [...nds, {
@@ -869,7 +871,8 @@ export function NodeBoard({ onRefresh }: Props) {
               { blockType: 'variable', icon: <Braces size={13} />,          label: 'Variable'        },
               { blockType: 'output',   icon: <HardDriveDownload size={13} />, label: 'Output Capture' },
               { blockType: 'http',     icon: <Wifi size={13} />,             label: 'HTTP Request'    },
-              { blockType: 'gate',     icon: <ShieldAlert size={13} />,      label: 'Approval Gate'   },
+              { blockType: 'gate',     icon: <ShieldAlert size={13} />,      label: 'Approval Gate'  },
+              { blockType: 'mcp',      icon: <Braces size={13} />,           label: 'MCP Tool'       },
             ] as const).map(({ blockType, icon, label }) => (
               <div
                 key={blockType}

@@ -45,6 +45,25 @@
 .block-output.selected { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.12); }
 .block-output-icon { color: #6366f1 !important; }
 
+/* MCP tool — lime accent */
+.block-mcp { border-color: #1a2e05; }
+.block-mcp.selected { border-color: #84cc16; box-shadow: 0 0 0 2px rgba(132,204,22,0.12); }
+
+.block-mcp-select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text);
+  -webkit-user-select: text;
+  user-select: text;
+}
+.block-mcp-select:focus { border-color: #84cc16; outline: none; }
+.block-mcp-select:disabled { opacity: 0.6; cursor: not-allowed; }
+
 /* Approval gate — amber accent */
 .block-gate { border-color: #3b2700; }
 .block-gate.selected { border-color: var(--amber); box-shadow: 0 0 0 2px rgba(245,158,11,0.15); }

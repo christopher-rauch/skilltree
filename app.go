@@ -660,6 +660,35 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 			label, _ := node.Data["label"].(string)
 
 			switch node.Type {
+			case "block-mcp":
+				serverName, _ := node.Data["serverName"].(string)
+				toolName, _ := node.Data["toolName"].(string)
+				responseVar, _ := node.Data["responseVar"].(string)
+				if responseVar == "" {
+					responseVar = "mcp_response"
+				}
+				if label == "" {
+					label = "MCP Tool"
+				}
+				fmt.Fprintf(&sb, "### %s\n\n", label)
+				fmt.Fprintf(&sb, "Invoke MCP tool `%s` on server `%s`", toolName, serverName)
+				if argList, ok := node.Data["args"].([]interface{}); ok && len(argList) > 0 {
+					sb.WriteString(" with arguments:\n\n")
+					for _, item := range argList {
+						if entry, ok := item.(map[string]interface{}); ok {
+							name, _ := entry["name"].(string)
+							value, _ := entry["value"].(string)
+							if name != "" {
+								fmt.Fprintf(&sb, "- `%s`: `%s`\n", name, applyExportVars(value, exportVars))
+							}
+						}
+					}
+					sb.WriteString("\n")
+				} else {
+					sb.WriteString(".\n\n")
+				}
+				fmt.Fprintf(&sb, "Store the response in `{{%s}}`.\n\n", responseVar)
+
 			case "block-gate":
 				message, _ := node.Data["message"].(string)
 				if label == "" {

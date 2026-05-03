@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useContext } from 'react'
 import { Handle, Position, NodeResizeControl, ResizeControlVariant, useReactFlow } from '@xyflow/react'
 import { Type, Terminal, BookOpen, FolderOpen, Paperclip, Globe, Braces, Plus, X, Wifi, ShieldAlert } from 'lucide-react'
 import { BadgeContext, RunContext, IsRunningContext, SetDirtyContext } from './NodeBoard'
-import { SaveBlockAsLibrarySkill, SelectScriptFile, SelectAnyFile } from '../../wailsjs/go/main/App'
+import { SaveBlockAsLibrarySkill, SelectScriptFile, SelectAnyFile, GetMCPServers } from '../../wailsjs/go/main/App'
 import './BuildingBlockNodes.css'
 
 const HANDLE_STYLE = {
@@ -731,6 +731,119 @@ export function ApprovalGateNode({ id, data, selected }: { id: string; data: App
           onChange={(e) => { updateNodeData(id, { ...data, message: e.target.value }); markDirty() }}
           onMouseDown={(e) => e.stopPropagation()}
         />
+      </div>
+    </>
+  )
+}
+
+// ── MCP Tool ─────────────────────────────────────────────────────────────────
+
+interface MCPToolData {
+  label?: string
+  serverName?: string
+  toolName?: string
+  args?: HttpKV[]
+  responseVar?: string
+  [key: string]: unknown
+}
+
+export function MCPToolNode({ id, data, selected }: { id: string; data: MCPToolData; selected: boolean }) {
+  const { updateNodeData } = useReactFlow()
+  const isRunning = useContext(IsRunningContext)
+  const runStatus = useContext(RunContext).get(id)
+  const markDirty = useContext(SetDirtyContext)
+
+  const [servers, setServers] = useState<string[]>([])
+  const args: HttpKV[] = (data.args as HttpKV[] | undefined) ?? []
+
+  useEffect(() => {
+    GetMCPServers().then(setServers).catch(() => {})
+  }, [])
+
+  function update(patch: Partial<MCPToolData>) {
+    updateNodeData(id, { ...data, ...patch })
+    markDirty()
+  }
+
+  function setArg(idx: number, field: 'name' | 'value', val: string) {
+    update({ args: args.map((a, i) => i === idx ? { ...a, [field]: val } : a) })
+  }
+
+  return (
+    <>
+      <BlockBadge id={id} />
+      <Handle type="target" position={Position.Top} style={HANDLE_STYLE} />
+      <Handle type="source" position={Position.Bottom} style={HANDLE_STYLE} />
+      <BlockResizeControls selected={selected} />
+
+      <div className={`block-node block-mcp ${selected ? 'selected' : ''} ${runStatus ?? ''}`}>
+        <div className="block-header">
+          <Braces size={12} className="block-icon" style={{ color: '#84cc16' }} />
+          <input
+            className="block-label-input nodrag nopan nowheel"
+            value={data.label ?? 'MCP Tool'}
+            disabled={isRunning}
+            onChange={(e) => update({ label: e.target.value })}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        </div>
+
+        {/* Server dropdown */}
+        <div className="block-url-row nodrag nopan nowheel">
+          <select
+            className="block-mcp-select nodrag nopan nowheel"
+            value={data.serverName ?? ''}
+            disabled={isRunning}
+            onChange={(e) => update({ serverName: e.target.value })}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <option value="">Select MCP server…</option>
+            {servers.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
+
+        {/* Tool name */}
+        <div className="block-url-row nodrag nopan nowheel">
+          <input
+            className="block-url-input nodrag nopan nowheel"
+            placeholder="Tool name (e.g. createJiraIssue)"
+            value={data.toolName ?? ''}
+            disabled={isRunning}
+            onChange={(e) => update({ toolName: e.target.value })}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        </div>
+
+        {/* Args */}
+        <div className="block-var-list nodrag nopan nowheel">
+          {args.map((a, i) => (
+            <div key={i} className="block-var-row">
+              <input className="block-var-name" placeholder="arg" value={a.name} disabled={isRunning}
+                onChange={(e) => setArg(i, 'name', e.target.value)} onMouseDown={(e) => e.stopPropagation()} />
+              <span className="block-var-eq">=</span>
+              <input className="block-var-value" placeholder="value" value={a.value} disabled={isRunning}
+                onChange={(e) => setArg(i, 'value', e.target.value)} onMouseDown={(e) => e.stopPropagation()} />
+              <button className="block-var-remove" disabled={isRunning}
+                onClick={() => update({ args: args.filter((_, j) => j !== i) })}>
+                <X size={9} />
+              </button>
+            </div>
+          ))}
+          <button className="block-var-add nodrag nopan" disabled={isRunning}
+            onClick={() => update({ args: [...args, { name: '', value: '' }] })}>
+            <Plus size={10} /> Add argument
+          </button>
+        </div>
+
+        {/* Response variable */}
+        <div className="block-http-resp-row nodrag nopan nowheel">
+          <span className="block-http-resp-label">Store as</span>
+          <span className="block-http-resp-brace">{'{{'}</span>
+          <input className="block-http-resp-var nodrag nopan nowheel" style={{ color: '#84cc16' }}
+            value={data.responseVar ?? 'mcp_response'} disabled={isRunning}
+            onChange={(e) => update({ responseVar: e.target.value })} onMouseDown={(e) => e.stopPropagation()} />
+          <span className="block-http-resp-brace">{'}}'}</span>
+        </div>
       </div>
     </>
   )

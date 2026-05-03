@@ -184,6 +184,27 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 
 	var runErr error
 	switch node.Type {
+	case "block-context":
+		content, _ := node.Data["content"].(string)
+		if strings.TrimSpace(content) == "" {
+			a.emitTerminal("\x1b[33m⚠ Context injector is empty — skipping\x1b[0m\r\n")
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		}
+		// Append to CLAUDE.md in the session dir so all subsequent claude -p
+		// calls in the same directory pick up this context automatically.
+		claudeMDPath := filepath.Join(dir, "CLAUDE.md")
+		existing, _ := os.ReadFile(claudeMDPath)
+		appended := string(existing) + "\n\n---\n\n## Injected Context\n\n" + strings.TrimSpace(content) + "\n"
+		if err := os.WriteFile(claudeMDPath, []byte(appended), 0644); err != nil {
+			a.emitTerminal(fmt.Sprintf("\x1b[31m✗ Could not write context: %s\x1b[0m\r\n", err.Error()))
+			runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+			return
+		}
+		a.emitTerminal("\x1b[2m  context injected into session\x1b[0m\r\n")
+		runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+		return
+
 	case "block-file":
 		filePath, _ := node.Data["filePath"].(string)
 		instruction, _ := node.Data["instruction"].(string)

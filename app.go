@@ -646,6 +646,18 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 			label, _ := node.Data["label"].(string)
 
 			switch node.Type {
+			case "block-context":
+				content, _ := node.Data["content"].(string)
+				if label == "" {
+					label = "Context"
+				}
+				fmt.Fprintf(&sb, "### %s *(context)*\n\n", label)
+				if strings.TrimSpace(content) != "" {
+					sb.WriteString("> The following context applies to all subsequent steps:\n\n")
+					sb.WriteString(strings.TrimSpace(content))
+					sb.WriteString("\n\n")
+				}
+
 			case "block-file":
 				filePath, _ := node.Data["filePath"].(string)
 				instruction, _ := node.Data["instruction"].(string)

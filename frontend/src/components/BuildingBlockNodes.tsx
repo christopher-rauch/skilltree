@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useContext } from 'react'
 import { Handle, Position, NodeResizeControl, ResizeControlVariant, useReactFlow } from '@xyflow/react'
-import { Type, Terminal, BookOpen, FolderOpen, Paperclip, X } from 'lucide-react'
+import { Type, Terminal, BookOpen, FolderOpen, Paperclip, Globe, X } from 'lucide-react'
 import { BadgeContext, RunContext, IsRunningContext, SetDirtyContext } from './NodeBoard'
 import { SaveBlockAsLibrarySkill, SelectScriptFile, SelectAnyFile } from '../../wailsjs/go/main/App'
 import './BuildingBlockNodes.css'
@@ -280,6 +280,58 @@ export function RunCommandNode({ id, data, selected }: { id: string; data: RunCo
           id={id}
           getContent={() => data.scriptPath ?? ''}
           blockType="command"
+        />
+      </div>
+    </>
+  )
+}
+
+// ── Context Injector ─────────────────────────────────────────────────────────
+
+interface ContextInjectorData {
+  label?: string
+  content?: string
+  savedSkillName?: string
+  [key: string]: unknown
+}
+
+export function ContextInjectorNode({ id, data, selected }: { id: string; data: ContextInjectorData; selected: boolean }) {
+  const { updateNodeData } = useReactFlow()
+  const isRunning = useContext(IsRunningContext)
+  const runStatus = useContext(RunContext).get(id)
+  const markDirty = useContext(SetDirtyContext)
+
+  return (
+    <>
+      <BlockBadge id={id} />
+      <Handle type="target" position={Position.Top} style={HANDLE_STYLE} />
+      <Handle type="source" position={Position.Bottom} style={HANDLE_STYLE} />
+      <BlockResizeControls selected={selected} />
+
+      <div className={`block-node block-context ${selected ? 'selected' : ''} ${runStatus ?? ''}`}>
+        <div className="block-header">
+          <Globe size={12} className="block-icon" />
+          <input
+            className="block-label-input nodrag nopan nowheel"
+            value={data.label ?? 'Context'}
+            disabled={isRunning}
+            onChange={(e) => { updateNodeData(id, { ...data, label: e.target.value }); markDirty() }}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+          {data.savedSkillName && <span className="block-saved-badge">library</span>}
+        </div>
+        <textarea
+          className="block-textarea nodrag nopan nowheel"
+          placeholder="Static context for all downstream steps — project background, constraints, style guide…"
+          value={data.content ?? ''}
+          disabled={isRunning}
+          onChange={(e) => { updateNodeData(id, { ...data, content: e.target.value }); markDirty() }}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+        <SaveToLibrary
+          id={id}
+          getContent={() => data.content ?? ''}
+          blockType="text"
         />
       </div>
     </>

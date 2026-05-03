@@ -26,7 +26,7 @@ import { useStore } from '../store'
 import { Flow, FlowNode, FlowEdge } from '../types'
 import { SkillNode } from './SkillNode'
 import { AnnotationTextNode, AnnotationStickyNode, AnnotationDrawingNode } from './AnnotationNodes'
-import { TextBlockNode, RunCommandNode, FileInputNode } from './BuildingBlockNodes'
+import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode } from './BuildingBlockNodes'
 import {
   SaveFlow,
   DeleteFlow,
@@ -39,7 +39,7 @@ import {
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   Plus, Save, Trash2, Download, ChevronDown, Check, X, Copy, AlertTriangle,
-  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip,
+  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip, Globe,
 } from 'lucide-react'
 import { ProjectScopeInfo } from './ProjectScopeInfo'
 import { GithubButton } from './GithubButton'
@@ -53,6 +53,7 @@ const nodeTypes = {
   'block-text':    TextBlockNode,
   'block-command': RunCommandNode,
   'block-file':    FileInputNode,
+  'block-context': ContextInjectorNode,
 }
 
 export const BadgeContext = createContext<Map<string, string>>(new Map())
@@ -563,7 +564,8 @@ export function NodeBoard({ onRefresh }: Props) {
         const defaults: Record<string, { label: string; height: number; data: Record<string, unknown> }> = {
           text:    { label: 'Text Block',  height: 180, data: { content: '' } },
           command: { label: 'Run Command', height: 90,  data: { scriptPath: '' } },
-          file:    { label: 'File Input',  height: 140, data: { filePath: '', instruction: '' } },
+          file:    { label: 'File Input',      height: 140, data: { filePath: '', instruction: '' } },
+          context: { label: 'Context Injector', height: 180, data: { content: '' } },
         }
         const def = defaults[blockType] ?? defaults.text
         setNodes((nds) => [...nds, {
@@ -847,9 +849,10 @@ export function NodeBoard({ onRefresh }: Props) {
           <div className="palette-tools-header">Building Blocks</div>
           <div className="palette-tools-list">
             {([
-              { blockType: 'text',    icon: <Type size={13} />,      label: 'Text Block'   },
-              { blockType: 'command', icon: <Terminal size={13} />,  label: 'Run Command'  },
-              { blockType: 'file',    icon: <Paperclip size={13} />, label: 'File Input'   },
+              { blockType: 'text',    icon: <Type size={13} />,      label: 'Text Block'      },
+              { blockType: 'command', icon: <Terminal size={13} />,  label: 'Run Command'     },
+              { blockType: 'file',    icon: <Paperclip size={13} />, label: 'File Input'      },
+              { blockType: 'context', icon: <Globe size={13} />,     label: 'Context Injector'},
             ] as const).map(({ blockType, icon, label }) => (
               <div
                 key={blockType}

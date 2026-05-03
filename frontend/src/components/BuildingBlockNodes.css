@@ -30,6 +30,11 @@
 .block-file.selected { border-color: #14b8a6; box-shadow: 0 0 0 2px rgba(20,184,166,0.12); }
 .block-file .block-icon { color: #14b8a6; }
 
+/* Context injector — gold accent */
+.block-context { border-color: #3b2a00; }
+.block-context.selected { border-color: #eab308; box-shadow: 0 0 0 2px rgba(234,179,8,0.12); }
+.block-context .block-icon { color: #eab308; }
+
 /* ── Run states (mirrors SkillNode) ─────────────────────────────────────── */
 .block-node.running { border-color: var(--amber); animation: node-running-pulse 1.4s ease-in-out infinite; }
 .block-node.done    { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-ghost); }

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useContext } from 'react'
 import { Handle, Position, NodeResizeControl, ResizeControlVariant, useReactFlow } from '@xyflow/react'
-import { Type, Terminal, BookOpen, FolderOpen, Paperclip, Globe, Braces, Plus, X } from 'lucide-react'
+import { Type, Terminal, BookOpen, FolderOpen, Paperclip, Globe, Braces, Plus, X, Wifi } from 'lucide-react'
 import { BadgeContext, RunContext, IsRunningContext, SetDirtyContext } from './NodeBoard'
 import { SaveBlockAsLibrarySkill, SelectScriptFile, SelectAnyFile } from '../../wailsjs/go/main/App'
 import './BuildingBlockNodes.css'
@@ -492,6 +492,148 @@ export function OutputCaptureNode({ id, data, selected }: { id: string; data: Ou
         {dest === 'clipboard' && (
           <div className="block-clipboard-note">Copies output to macOS clipboard</div>
         )}
+      </div>
+    </>
+  )
+}
+
+// ── HTTP Request ─────────────────────────────────────────────────────────────
+
+type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
+const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
+
+interface HttpHeader { name: string; value: string }
+
+interface HttpRequestData {
+  label?: string
+  method?: HttpMethod
+  url?: string
+  headers?: HttpHeader[]
+  body?: string
+  responseVar?: string
+  showHeaders?: boolean
+  [key: string]: unknown
+}
+
+export function HttpRequestNode({ id, data, selected }: { id: string; data: HttpRequestData; selected: boolean }) {
+  const { updateNodeData } = useReactFlow()
+  const isRunning = useContext(IsRunningContext)
+  const runStatus = useContext(RunContext).get(id)
+  const markDirty = useContext(SetDirtyContext)
+
+  const method = data.method ?? 'GET'
+  const headers: HttpHeader[] = (data.headers as HttpHeader[] | undefined) ?? []
+  const showBody = ['POST', 'PUT', 'PATCH'].includes(method)
+  const showHeaders = data.showHeaders ?? false
+
+  function update(patch: Partial<HttpRequestData>) {
+    updateNodeData(id, { ...data, ...patch })
+    markDirty()
+  }
+
+  function setHeader(idx: number, field: 'name' | 'value', val: string) {
+    update({ headers: headers.map((h, i) => i === idx ? { ...h, [field]: val } : h) })
+  }
+
+  return (
+    <>
+      <BlockBadge id={id} />
+      <Handle type="target" position={Position.Top} style={HANDLE_STYLE} />
+      <Handle type="source" position={Position.Bottom} style={HANDLE_STYLE} />
+      <BlockResizeControls selected={selected} />
+
+      <div className={`block-node block-http ${selected ? 'selected' : ''} ${runStatus ?? ''}`}>
+        <div className="block-header">
+          <Wifi size={12} className="block-icon" />
+          <input
+            className="block-label-input nodrag nopan nowheel"
+            value={data.label ?? 'HTTP Request'}
+            disabled={isRunning}
+            onChange={(e) => update({ label: e.target.value })}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        </div>
+
+        {/* Method selector */}
+        <div className="block-http-methods nodrag nopan nowheel">
+          {HTTP_METHODS.map((m) => (
+            <button
+              key={m}
+              className={`block-http-method ${method === m ? 'active' : ''} method-${m.toLowerCase()}`}
+              disabled={isRunning}
+              onClick={() => update({ method: m })}
+            >{m}</button>
+          ))}
+        </div>
+
+        {/* URL */}
+        <div className="block-url-row nodrag nopan nowheel">
+          <input
+            className="block-url-input nodrag nopan nowheel"
+            placeholder="https://api.example.com/endpoint"
+            value={data.url ?? ''}
+            disabled={isRunning}
+            onChange={(e) => update({ url: e.target.value })}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        </div>
+
+        {/* Headers toggle */}
+        <button
+          className="block-http-section-toggle nodrag nopan"
+          onClick={() => update({ showHeaders: !showHeaders })}
+          disabled={isRunning}
+        >
+          {showHeaders ? '▾' : '▸'} Headers {headers.length > 0 ? `(${headers.length})` : ''}
+        </button>
+        {showHeaders && (
+          <div className="block-var-list nodrag nopan nowheel">
+            {headers.map((h, i) => (
+              <div key={i} className="block-var-row">
+                <input className="block-var-name" placeholder="Header-Name" value={h.name} disabled={isRunning}
+                  onChange={(e) => setHeader(i, 'name', e.target.value)} onMouseDown={(e) => e.stopPropagation()} />
+                <span className="block-var-eq">:</span>
+                <input className="block-var-value" placeholder="value" value={h.value} disabled={isRunning}
+                  onChange={(e) => setHeader(i, 'value', e.target.value)} onMouseDown={(e) => e.stopPropagation()} />
+                <button className="block-var-remove" disabled={isRunning}
+                  onClick={() => update({ headers: headers.filter((_, j) => j !== i) })}>
+                  <X size={9} />
+                </button>
+              </div>
+            ))}
+            <button className="block-var-add nodrag nopan" disabled={isRunning}
+              onClick={() => update({ headers: [...headers, { name: '', value: '' }] })}>
+              <Plus size={10} /> Add header
+            </button>
+          </div>
+        )}
+
+        {/* Body */}
+        {showBody && (
+          <textarea
+            className="block-textarea nodrag nopan nowheel"
+            style={{ minHeight: 60 }}
+            placeholder='{"key": "value"}'
+            value={data.body ?? ''}
+            disabled={isRunning}
+            onChange={(e) => update({ body: e.target.value })}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        )}
+
+        {/* Response variable */}
+        <div className="block-http-resp-row nodrag nopan nowheel">
+          <span className="block-http-resp-label">Store as</span>
+          <span className="block-http-resp-brace">{'{{'}  </span>
+          <input
+            className="block-http-resp-var nodrag nopan nowheel"
+            value={data.responseVar ?? 'http_response'}
+            disabled={isRunning}
+            onChange={(e) => update({ responseVar: e.target.value })}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+          <span className="block-http-resp-brace">{'}}'}</span>
+        </div>
       </div>
     </>
   )

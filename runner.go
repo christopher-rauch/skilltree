@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"maps"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -228,6 +231,87 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 
 	var runErr error
 	switch node.Type {
+	case "block-http":
+		method, _ := node.Data["method"].(string)
+		if method == "" {
+			method = "GET"
+		}
+		rawURL, _ := node.Data["url"].(string)
+		rawURL = sub(rawURL)
+		if strings.TrimSpace(rawURL) == "" {
+			a.emitTerminal("\x1b[33m⚠ No URL set — skipping\x1b[0m\r\n")
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		}
+		bodyStr, _ := node.Data["body"].(string)
+		bodyStr = sub(bodyStr)
+		responseVar, _ := node.Data["responseVar"].(string)
+		if responseVar == "" {
+			responseVar = "http_response"
+		}
+
+		a.emitTerminal(fmt.Sprintf("\x1b[2m  %s %s\x1b[0m\r\n", method, rawURL))
+
+		var bodyReader *bytes.Reader
+		if bodyStr != "" {
+			bodyReader = bytes.NewReader([]byte(bodyStr))
+		} else {
+			bodyReader = bytes.NewReader(nil)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, rawURL, bodyReader)
+		if err != nil {
+			a.emitTerminal(fmt.Sprintf("\x1b[31m✗ Invalid request: %s\x1b[0m\r\n", err.Error()))
+			runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+			return
+		}
+
+		// Apply headers
+		if headerList, ok := node.Data["headers"].([]interface{}); ok {
+			for _, item := range headerList {
+				if entry, ok := item.(map[string]interface{}); ok {
+					name, _ := entry["name"].(string)
+					value, _ := entry["value"].(string)
+					if name != "" {
+						req.Header.Set(sub(name), sub(value))
+					}
+				}
+			}
+		}
+
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			a.emitTerminal(fmt.Sprintf("\x1b[31m✗ Request failed: %s\x1b[0m\r\n", err.Error()))
+			runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+			return
+		}
+		defer resp.Body.Close()
+
+		respBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MB limit
+		respBody := string(respBytes)
+
+		// Emit status + truncated preview
+		statusColor := "\x1b[32m"
+		if resp.StatusCode >= 400 {
+			statusColor = "\x1b[31m"
+		} else if resp.StatusCode >= 300 {
+			statusColor = "\x1b[33m"
+		}
+		a.emitTerminal(fmt.Sprintf("%sHTTP %d %s\x1b[0m\r\n", statusColor, resp.StatusCode, resp.Status))
+		preview := respBody
+		if len(preview) > 500 {
+			preview = preview[:500] + "…"
+		}
+		a.emitTerminal(preview + "\r\n")
+
+		// Store full response in vars
+		varsMu.Lock()
+		vars[responseVar] = respBody
+		varsMu.Unlock()
+		a.emitTerminal(fmt.Sprintf("\x1b[2m  stored in {{%s}}\x1b[0m\r\n", responseVar))
+		runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+		return
+
 	case "block-output":
 		destination, _ := node.Data["destination"].(string)
 		filePath, _ := node.Data["filePath"].(string)

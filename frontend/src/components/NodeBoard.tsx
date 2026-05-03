@@ -26,7 +26,7 @@ import { useStore } from '../store'
 import { Flow, FlowNode, FlowEdge } from '../types'
 import { SkillNode } from './SkillNode'
 import { AnnotationTextNode, AnnotationStickyNode, AnnotationDrawingNode } from './AnnotationNodes'
-import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode, OutputCaptureNode } from './BuildingBlockNodes'
+import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode, OutputCaptureNode, HttpRequestNode } from './BuildingBlockNodes'
 import {
   SaveFlow,
   DeleteFlow,
@@ -39,7 +39,7 @@ import {
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   Plus, Save, Trash2, Download, ChevronDown, Check, X, Copy, AlertTriangle,
-  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip, Globe, Braces, HardDriveDownload,
+  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip, Globe, Braces, HardDriveDownload, Wifi,
 } from 'lucide-react'
 import { ProjectScopeInfo } from './ProjectScopeInfo'
 import { GithubButton } from './GithubButton'
@@ -56,6 +56,7 @@ const nodeTypes = {
   'block-context':   ContextInjectorNode,
   'block-variable':  VariableNode,
   'block-output':    OutputCaptureNode,
+  'block-http':      HttpRequestNode,
 }
 
 export const BadgeContext = createContext<Map<string, string>>(new Map())
@@ -570,6 +571,7 @@ export function NodeBoard({ onRefresh }: Props) {
           context:  { label: 'Context Injector', height: 180, data: { content: '' } },
           variable: { label: 'Variables',        height: 130, data: { variables: [] } },
           output:   { label: 'Output Capture',   height: 110, data: { destination: 'file', filePath: '' } },
+          http:     { label: 'HTTP Request',     height: 160, data: { method: 'GET', url: '', headers: [], body: '', responseVar: 'http_response', showHeaders: false } },
         }
         const def = defaults[blockType] ?? defaults.text
         setNodes((nds) => [...nds, {
@@ -858,7 +860,8 @@ export function NodeBoard({ onRefresh }: Props) {
               { blockType: 'file',    icon: <Paperclip size={13} />, label: 'File Input'      },
               { blockType: 'context',  icon: <Globe size={13} />,   label: 'Context Injector' },
               { blockType: 'variable', icon: <Braces size={13} />,          label: 'Variable'        },
-              { blockType: 'output',   icon: <HardDriveDownload size={13} />, label: 'Output Capture'  },
+              { blockType: 'output',   icon: <HardDriveDownload size={13} />, label: 'Output Capture' },
+              { blockType: 'http',     icon: <Wifi size={13} />,             label: 'HTTP Request'   },
             ] as const).map(({ blockType, icon, label }) => (
               <div
                 key={blockType}

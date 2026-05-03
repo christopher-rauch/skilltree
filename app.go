@@ -652,6 +652,39 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 			label, _ := node.Data["label"].(string)
 
 			switch node.Type {
+			case "block-http":
+				method, _ := node.Data["method"].(string)
+				if method == "" {
+					method = "GET"
+				}
+				rawURL, _ := node.Data["url"].(string)
+				rawURL = applyExportVars(rawURL, exportVars)
+				responseVar, _ := node.Data["responseVar"].(string)
+				if responseVar == "" {
+					responseVar = "http_response"
+				}
+				if label == "" {
+					label = "HTTP Request"
+				}
+				fmt.Fprintf(&sb, "### %s\n\n", label)
+				fmt.Fprintf(&sb, "```http\n%s %s\n", method, rawURL)
+				if headerList, ok := node.Data["headers"].([]interface{}); ok {
+					for _, item := range headerList {
+						if entry, ok := item.(map[string]interface{}); ok {
+							name, _ := entry["name"].(string)
+							value, _ := entry["value"].(string)
+							if name != "" {
+								fmt.Fprintf(&sb, "%s: %s\n", name, applyExportVars(value, exportVars))
+							}
+						}
+					}
+				}
+				if body, _ := node.Data["body"].(string); body != "" {
+					fmt.Fprintf(&sb, "\n%s\n", applyExportVars(body, exportVars))
+				}
+				sb.WriteString("```\n\n")
+				fmt.Fprintf(&sb, "Store the response body in `{{%s}}`.\n\n", responseVar)
+
 			case "block-output":
 				destination, _ := node.Data["destination"].(string)
 				filePath, _ := node.Data["filePath"].(string)

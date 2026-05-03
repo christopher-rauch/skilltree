@@ -37,6 +37,7 @@ import {
   RunFlow,
   StopFlowRun,
   GateResponse,
+  DeleteCustomBlock,
 } from '../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
@@ -231,7 +232,7 @@ export function NodeBoard({ onRefresh }: Props) {
     terminalOpen, setTerminalOpen,
     setView, setPreviewSkill,
     claudeAvailable,
-    customBlocks,
+    customBlocks, setCustomBlocks,
   } = useStore()
 
   // Derive active flow
@@ -1147,9 +1148,10 @@ export function NodeBoard({ onRefresh }: Props) {
         <div className="palette-list">
           {(() => {
             const q = skillSearch.trim().toLowerCase()
+            const draggable = skills.filter((s) => !s.system)
             const visible = q
-              ? skills.filter((s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q))
-              : skills
+              ? draggable.filter((s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q))
+              : draggable
             if (visible.length === 0)
               return <div className="palette-empty">{q ? 'No matches' : 'No skills loaded'}</div>
             return visible.map((skill) => (
@@ -1559,14 +1561,18 @@ export function NodeBoard({ onRefresh }: Props) {
           </div>
         </div>
 
-        {customBlocks.length > 0 && (
-          <div className="palette-tools-section">
-            <div className="palette-tools-header">Custom Blocks</div>
+        <div className="palette-tools-section">
+          <div className="palette-tools-header">Custom Blocks</div>
+          {customBlocks.length === 0 ? (
+            <div className="palette-empty" style={{ fontSize: 11, padding: '8px 10px' }}>
+              Ask Claude in the terminal to create a custom block, or add a JSON file to ~/.claude/skilltree/blocks/
+            </div>
+          ) : (
             <div className="palette-tools-list">
               {customBlocks.map((def) => (
                 <div
                   key={def.id}
-                  className={`palette-item ${isRunning || !activeFlow ? 'disabled' : ''}`}
+                  className={`palette-item custom-block-palette-item ${isRunning || !activeFlow ? 'disabled' : ''}`}
                   draggable={!isRunning && !!activeFlow}
                   onDragStart={(e) => {
                     e.dataTransfer.setData('application/skilltree-block', JSON.stringify({ blockType: 'custom', blockDefinitionId: def.id }))
@@ -1574,15 +1580,30 @@ export function NodeBoard({ onRefresh }: Props) {
                   }}
                   title={def.description}
                 >
-                  <span className="palette-item-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="palette-item-name" style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                     <span style={{ width: 10, height: 10, borderRadius: '50%', background: def.color ?? '#a855f7', flexShrink: 0, display: 'inline-block' }} />
                     {def.name}
                   </span>
+                  <button
+                    className="custom-block-delete-btn"
+                    title={`Delete ${def.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      // Optimistic removal — update UI before the async Go call
+                      setCustomBlocks(customBlocks.filter(b => b.id !== def.id))
+                      DeleteCustomBlock(def.id).catch(() => {
+                        // Revert on failure
+                        setCustomBlocks(customBlocks)
+                      })
+                    }}
+                  >
+                    <Trash2 size={11} />
+                  </button>
                 </div>
               ))}
             </div>
-          </div>
-        )}
+          )}
+        </div>
 
         <div className="palette-tools-section">
           <div className="palette-tools-header">Markups</div>

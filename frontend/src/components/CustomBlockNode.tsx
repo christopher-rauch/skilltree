@@ -49,9 +49,9 @@ export function CustomBlockNode({ id, data, selected }: { id: string; data: Reco
           <span className="custom-block-name">{def?.name ?? (blockId ? `Unknown: ${blockId}` : 'Custom Block')}</span>
         </div>
         {!def && (
-          <div className="custom-block-missing">Block definition not found</div>
+          <div className="custom-block-missing">Definition deleted — remove this node</div>
         )}
-        {def?.fields.map((field) => {
+        {(def?.fields ?? []).map((field) => {
           if (field.type === 'textarea') {
             return (
               <div key={field.key} className="custom-block-field">

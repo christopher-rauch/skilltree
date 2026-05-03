@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -836,6 +838,43 @@ func (a *App) resolveSkillPrompt(skillName, argumentValue string) string {
 	return "/" + skillName
 }
 
+// clStreamEvent is one JSON line from claude -p --output-format stream-json.
+type clStreamEvent struct {
+	Type    string `json:"type"`
+	Message struct {
+		Content []struct {
+			Type  string          `json:"type"`
+			Text  string          `json:"text,omitempty"`
+			Name  string          `json:"name,omitempty"`  // tool_use
+			Input json.RawMessage `json:"input,omitempty"` // tool_use
+		} `json:"content"`
+	} `json:"message"`
+	Subtype string `json:"subtype,omitempty"`
+	Result  string `json:"result,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// toolSummary extracts a short description from a tool_use input JSON.
+func toolSummary(_ string, raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	for _, key := range []string{"command", "file_path", "query", "url", "pattern", "description"} {
+		if v, ok := m[key].(string); ok && v != "" {
+			v = strings.SplitN(v, "\n", 2)[0] // first line only
+			if len(v) > 72 {
+				v = v[:69] + "…"
+			}
+			return ": " + v
+		}
+	}
+	return ""
+}
+
 func (a *App) runClaudePrompt(ctx context.Context, claudePath, dir, prompt string) error {
 	fullPath := os.Getenv("PATH")
 	if out, err := exec.Command(os.Getenv("SHELL"), "-l", "-c", "echo $PATH").Output(); err == nil {
@@ -844,7 +883,10 @@ func (a *App) runClaudePrompt(ctx context.Context, claudePath, dir, prompt strin
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, claudePath, "-p", prompt)
+	cmd := exec.CommandContext(ctx, claudePath, "-p", prompt,
+		"--output-format", "stream-json",
+		"--verbose",
+	)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"TERM=xterm-256color",
@@ -858,11 +900,45 @@ func (a *App) runClaudePrompt(ctx context.Context, claudePath, dir, prompt strin
 		return err
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); a.pipeToTerminal(stdout) }()
-	go func() { defer wg.Done(); a.pipeToTerminal(stderr) }()
-	wg.Wait()
+	// Pipe stderr (warnings/errors from claude itself)
+	go a.pipeToTerminal(stderr)
+
+	// Parse stream-json from stdout line by line
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 4<<20), 4<<20) // 4 MB — verbose system events can be large
+
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			break
+		}
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var ev clStreamEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			a.emitTerminal(line + "\r\n")
+			continue
+		}
+		switch ev.Type {
+		case "assistant":
+			for _, item := range ev.Message.Content {
+				switch item.Type {
+				case "text":
+					if t := strings.TrimSpace(item.Text); t != "" {
+						a.emitTerminal(strings.ReplaceAll(item.Text, "\n", "\r\n"))
+					}
+				case "tool_use":
+					sum := toolSummary(item.Name, item.Input)
+					a.emitTerminal(fmt.Sprintf("\r\n\x1b[2m  🔧 %s%s\x1b[0m\r\n", item.Name, sum))
+				}
+			}
+		case "result":
+			if ev.Subtype == "error" && ev.Error != "" {
+				a.emitTerminal(fmt.Sprintf("\r\n\x1b[31m  %s\x1b[0m\r\n", ev.Error))
+			}
+		}
+	}
 
 	return cmd.Wait()
 }

@@ -47,6 +47,7 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.settings = loadSettings()
 	a.ensureSystemSkills()
+	go a.watchCustomBlocks(ctx)
 	port, err := startMCPServer(a)
 	if err == nil {
 		a.mcpPort = port

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -60,6 +62,45 @@ type CustomBlockDef struct {
 	Color       string       `json:"color,omitempty"` // CSS colour
 	Fields      []BlockField `json:"fields"`
 	Execution   BlockExecution `json:"execution"`
+}
+
+// ── Filesystem watcher ───────────────────────────────────────────────────────
+
+// WatchCustomBlocks polls the blocks directory every 2 seconds and emits
+// blocks:updated whenever files are added, removed, or modified — regardless
+// of whether the change came through the MCP tool or Claude's file tools.
+func (a *App) watchCustomBlocks(ctx context.Context) {
+	dir := customBlocksDir()
+	sig := a.blocksDirSig(dir)
+	t := time.NewTicker(2 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if s := a.blocksDirSig(dir); s != sig {
+				sig = s
+				runtime.EventsEmit(a.ctx, "blocks:updated")
+			}
+		}
+	}
+}
+
+func (a *App) blocksDirSig(dir string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return ""
+	}
+	var parts []string
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		info, _ := e.Info()
+		parts = append(parts, e.Name()+":"+fmt.Sprint(info.ModTime().UnixMilli()))
+	}
+	return strings.Join(parts, ",")
 }
 
 // ── Storage ───────────────────────────────────────────────────────────────────

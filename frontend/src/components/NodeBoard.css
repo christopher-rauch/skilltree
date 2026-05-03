@@ -214,6 +214,24 @@
   overflow: hidden;
 }
 
+.custom-block-palette-item .custom-block-delete-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: color 0.1s, background 0.1s;
+}
+.custom-block-palette-item:hover .custom-block-delete-btn { display: flex; }
+.custom-block-delete-btn:hover { color: var(--red) !important; background: var(--red-ghost) !important; }
+
 .right-panel .palette-tools-section:first-child {
   border-top: none;
   flex: 1;

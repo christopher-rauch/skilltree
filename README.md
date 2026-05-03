@@ -52,17 +52,57 @@ Three non-destructive tools in the Builder palette that persist with the canvas 
 
 ---
 
-## Requirements
+## Installation
 
-- **macOS** (Wails uses WKWebView; Windows/Linux support is possible but untested)
-- [Go](https://golang.org) 1.21+
-- [Node.js](https://nodejs.org) 18+
-- [Wails CLI](https://wails.io/docs/gettingstarted/installation) v2
-- [Claude Code](https://claude.ai/code) (`npm i -g @anthropic-ai/claude-code`) — required for the terminal and auto-descriptions
+Download the latest release for your platform from the [Releases](https://github.com/christopher-rauch/skilltree/releases) page.
+
+| File | Platform |
+|---|---|
+| `Skilltree-macOS-AppleSilicon.zip` | macOS (M1 / M2 / M3 / M4) |
+| `Skilltree-macOS-Intel.zip` | macOS (Intel) |
+| `Skilltree-Windows-x64.zip` | Windows 64-bit |
+| `Skilltree-Linux-x64.tar.gz` | Linux 64-bit |
+
+You also need [Claude Code](https://claude.ai/code) installed for the terminal and auto-descriptions:
+
+```bash
+npm i -g @anthropic-ai/claude-code
+```
+
+### macOS
+
+Skilltree is not notarized, so macOS will block it on first launch. After unzipping, run this command once to clear the quarantine flag:
+
+```bash
+xattr -cr /Applications/Skilltree.app
+```
+
+Then double-click to open normally. If you placed the app somewhere other than `/Applications`, adjust the path accordingly.
+
+> Alternatively: right-click the app → **Open** → **Open** in the dialog that appears. This works as a one-time override without using the terminal.
+
+### Windows
+
+Unzip the archive and run `skilltree.exe`. Windows SmartScreen may show a warning on first launch — click **More info → Run anyway**.
+
+### Linux
+
+Extract the archive and run the `skilltree` binary:
+
+```bash
+tar -xzf Skilltree-Linux-x64.tar.gz
+./skilltree
+```
 
 ---
 
-## Getting Started
+## Building from Source
+
+### Requirements
+
+- [Go](https://golang.org) 1.21+
+- [Node.js](https://nodejs.org) 18+
+- [Wails CLI](https://wails.io/docs/gettingstarted/installation) v2
 
 ```bash
 # Install Wails CLI

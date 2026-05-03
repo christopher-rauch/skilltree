@@ -2,7 +2,7 @@
 
 A visual workflow builder and runner for [Claude Code](https://claude.ai/code). Design, run, and export multi-step AI workflows as node-based skilltrees — with live step-by-step execution, a built-in Claude terminal, and full MCP integration.
 
-Built with [Wails](https://wails.io) (Go + React/TypeScript).
+Built with [Wails](https://wails.io) (Go + React/TypeScript) and [React Flow](https://reactflow.dev).
 
 ---
 

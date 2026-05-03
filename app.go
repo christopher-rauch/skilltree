@@ -46,6 +46,9 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.settings = loadSettings()
+	a.ensureDirectories()
+	a.ensureSystemSkills()
+	go a.watchCustomBlocks(ctx)
 	port, err := startMCPServer(a)
 	if err == nil {
 		a.mcpPort = port
@@ -56,6 +59,18 @@ func (a *App) startup(ctx context.Context) {
 			[]byte(fmt.Sprintf("%d", port)),
 			0644,
 		)
+	}
+}
+
+// ensureDirectories creates all app-managed directories on first launch.
+func (a *App) ensureDirectories() {
+	for _, dir := range []string{
+		a.globalSkillsDir(),
+		a.librarySkillsDir(),
+		customBlocksDir(),
+		flowsDir(),
+	} {
+		_ = os.MkdirAll(dir, 0755)
 	}
 }
 
@@ -101,7 +116,8 @@ type Skill struct {
 	ArgumentHint string `json:"argumentHint"`
 	AllowedTools string `json:"allowedTools"`
 	Body         string `json:"body"`
-	Scope        string `json:"scope"` // "global" | "project"
+	Scope        string `json:"scope"` // "global" | "project" | "library"
+	System       bool   `json:"system,omitempty"`
 }
 
 type skillFrontmatter struct {
@@ -109,6 +125,7 @@ type skillFrontmatter struct {
 	Description  string      `yaml:"description"`
 	ArgumentHint interface{} `yaml:"argument-hint,omitempty"`
 	AllowedTools interface{} `yaml:"allowed-tools,omitempty"`
+	System       bool        `yaml:"system,omitempty"`
 }
 
 // yamlFieldToString coerces a YAML value to a string. Unquoted bracket
@@ -269,6 +286,7 @@ func parseSkillFile(path string, scope string) (Skill, error) {
 		AllowedTools: yamlFieldToString(fm.AllowedTools),
 		Body:         body,
 		Scope:        scope,
+		System:       fm.System,
 	}, nil
 }
 
@@ -874,6 +892,51 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 					sb.WriteString(".\n\n")
 				}
 				fmt.Fprintf(&sb, "Store the response in `{{%s}}`.\n\n", responseVar)
+
+			case "custom-block":
+				blockID, _ := node.Data["blockDefinitionId"].(string)
+				if label == "" {
+					label = "Custom Block"
+				}
+				fmt.Fprintf(&sb, "### %s\n\n", label)
+				// Embed the block definition inline so the export is self-contained
+				blocks, _ := a.GetCustomBlocks()
+				for _, def := range blocks {
+					if def.ID != blockID {
+						continue
+					}
+					if def.Description != "" {
+						fmt.Fprintf(&sb, "> %s\n\n", def.Description)
+					}
+					rawValues, _ := node.Data["fieldValues"].(map[string]interface{})
+					switch def.Execution.Type {
+					case BlockExecClaudePrompt:
+						prompt := def.Execution.PromptTemplate
+						for _, f := range def.Fields {
+							val := fmt.Sprint(rawValues[f.Key])
+							prompt = strings.ReplaceAll(prompt, "{{"+f.Key+"}}", applyExportVars(val, exportVars))
+						}
+						sb.WriteString(strings.TrimSpace(prompt))
+						sb.WriteString("\n\n")
+					case BlockExecShellScript:
+						script := def.Execution.InlineScript
+						if def.Execution.InlineField != "" {
+							if v, ok := rawValues[def.Execution.InlineField]; ok {
+								script = fmt.Sprint(v)
+							}
+						}
+						if script != "" {
+							fmt.Fprintf(&sb, "Run the following script:\n\n```bash\n%s\n```\n\n", strings.TrimSpace(script))
+						}
+					case BlockExecHTTPRequest:
+						method := def.Execution.Method
+						if method == "" {
+							method = "GET"
+						}
+						fmt.Fprintf(&sb, "```http\n%s %s\n```\n\n", method, def.Execution.URLTemplate)
+					}
+					break
+				}
 
 			case "block-gate":
 				message, _ := node.Data["message"].(string)

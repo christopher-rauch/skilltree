@@ -9,7 +9,7 @@ import './BuildingBlockNodes.css'
 // undo/redo) without overwriting in-progress edits. Using local state prevents
 // React's controlled-input reconciliation from resetting the cursor position on
 // each keystroke when the parent re-renders due to dirty/store updates.
-function useLocalValue(external: string | undefined): [string, (v: string) => void] {
+export function useLocalValue(external: string | undefined): [string, (v: string) => void] {
   const [local, setLocal] = useState(external ?? '')
   const ownUpdate = useRef(false)
   useEffect(() => {

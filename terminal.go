@@ -77,6 +77,21 @@ func (a *App) StartTerminal(cols, rows uint16) error {
 		return err
 	}
 
+	// Symlink library skills into the session as project-scoped skills so Claude
+	// can invoke them (e.g. /create-custom-block) from the interactive terminal.
+	sessionSkillsDir := filepath.Join(dir, ".claude", "skills")
+	if libEntries, err := os.ReadDir(a.librarySkillsDir()); err == nil && len(libEntries) > 0 {
+		_ = os.MkdirAll(sessionSkillsDir, 0755)
+		for _, e := range libEntries {
+			if !e.IsDir() {
+				continue
+			}
+			src := filepath.Join(a.librarySkillsDir(), e.Name())
+			dst := filepath.Join(sessionSkillsDir, e.Name())
+			_ = os.Symlink(src, dst)
+		}
+	}
+
 	nodePath, err := shellWhich("node")
 	if err != nil {
 		os.RemoveAll(dir)

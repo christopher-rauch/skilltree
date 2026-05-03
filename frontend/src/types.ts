@@ -5,6 +5,7 @@ export interface Skill {
   allowedTools: string
   body: string
   scope: 'global' | 'project' | 'library'
+  system?: boolean
 }
 
 export interface FlowNodeData {
@@ -55,4 +56,31 @@ export interface FlowEdge {
 }
 
 export type View = 'skills' | 'board' | 'trees'
+
+export interface CustomBlockField {
+  key: string
+  label: string
+  type: 'text' | 'textarea' | 'select' | 'number' | 'file'
+  placeholder?: string
+  default?: string | number
+  options?: string[]
+}
+
+export interface CustomBlockDef {
+  id: string
+  name: string
+  description?: string
+  icon?: string
+  color?: string
+  fields: CustomBlockField[]
+  execution: {
+    type: 'claude_prompt' | 'shell_script' | 'http_request'
+    promptTemplate?: string
+    inlineScript?: string
+    inlineField?: string
+    method?: string
+    urlTemplate?: string
+    bodyTemplate?: string
+  }
+}
 export type SkillScope = 'global' | 'project' | 'library'

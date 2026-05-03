@@ -82,7 +82,7 @@ Drag skills and building blocks onto a canvas and connect them into directed wor
 
 ### Building Blocks
 
-Beyond named skills, the builder provides 11 programmable blocks:
+Beyond named skills, the builder provides 11 built-in programmable blocks plus **Custom Blocks**:
 
 | Block | Purpose |
 |---|---|
@@ -99,6 +99,20 @@ Beyond named skills, the builder provides 11 programmable blocks:
 | **Loop** | Repeat a prompt N times with `{{iteration}}` substitution |
 
 Building blocks can be saved as **Library skills** — they are inlined into exported flows rather than referenced by name, keeping exports fully self-contained.
+
+### Custom Blocks
+
+Create your own building blocks without any code changes. Custom blocks are JSON files in `~/.claude/skilltree/blocks/` — the palette refreshes within 2 seconds of a file being added or removed.
+
+Ask Claude in the built-in terminal to create one:
+
+```
+/create-custom-block a block that posts a message to a Slack webhook
+```
+
+Claude writes the JSON file directly and the block appears in the **Custom Blocks** palette immediately. Custom blocks support the same `{{fieldKey}}` variable substitution as built-in blocks and map to three execution types: `claude_prompt`, `shell_script`, and `http_request`.
+
+To delete a custom block, hover over it in the palette and click the trash icon. The palette refreshes automatically.
 
 ### Exporting as Skill
 

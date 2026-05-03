@@ -27,6 +27,7 @@ import { Flow, FlowNode, FlowEdge, Skill } from '../types'
 import { SkillNode } from './SkillNode'
 import { AnnotationTextNode, AnnotationStickyNode, AnnotationDrawingNode } from './AnnotationNodes'
 import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode, OutputCaptureNode, HttpRequestNode, ApprovalGateNode, MCPToolNode, ConditionNode, LoopNode } from './BuildingBlockNodes'
+import { CustomBlockNode } from './CustomBlockNode'
 import {
   SaveFlow,
   DeleteFlow,
@@ -36,6 +37,7 @@ import {
   RunFlow,
   StopFlowRun,
   GateResponse,
+  DeleteCustomBlock,
 } from '../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
@@ -62,6 +64,7 @@ const nodeTypes = {
   'block-mcp':       MCPToolNode,
   'block-condition': ConditionNode,
   'block-loop':      LoopNode,
+  'custom-block':    CustomBlockNode,
 }
 
 export const BadgeContext = createContext<Map<string, string>>(new Map())
@@ -70,6 +73,8 @@ export type RunStatus = 'running' | 'done' | 'error'
 export const RunContext = createContext<Map<string, RunStatus>>(new Map())
 export const IsRunningContext = createContext(false)
 export const SetDirtyContext = createContext<() => void>(() => {})
+import type { CustomBlockDef } from '../types'
+export const CustomBlocksContext = createContext<CustomBlockDef[]>([])
 
 function computeNodeBadges(nodes: Node[], edges: Edge[]): Map<string, string> {
   const connectedIds = new Set<string>()
@@ -227,6 +232,7 @@ export function NodeBoard({ onRefresh }: Props) {
     terminalOpen, setTerminalOpen,
     setView, setPreviewSkill,
     claudeAvailable,
+    customBlocks, setCustomBlocks,
   } = useStore()
 
   // Derive active flow
@@ -727,6 +733,24 @@ export function NodeBoard({ onRefresh }: Props) {
           condition: { label: 'Condition',  height: 140, data: { condition: '' } },
           loop:      { label: 'Loop',       height: 160, data: { count: 3, prompt: '' } },
         }
+        if (blockType === 'custom') {
+          const defId = (JSON.parse(blockRaw) as { blockDefinitionId?: string }).blockDefinitionId ?? ''
+          const customDef = customBlocks.find((d) => d.id === defId)
+          const defaultVals: Record<string, string> = {}
+          customDef?.fields.forEach((f) => { if (f.default != null) defaultVals[f.key] = String(f.default) })
+          pushHistory()
+          setNodes((nds) => [...nds, {
+            id,
+            type: 'custom-block',
+            position,
+            width: 240,
+            height: Math.max(80, 44 + (customDef?.fields.length ?? 0) * 38),
+            data: { blockDefinitionId: defId, fieldValues: defaultVals, label: customDef?.name ?? 'Custom Block' },
+          }])
+          setDirty(true)
+          return
+        }
+
         const def = defaults[blockType] ?? defaults.text
         pushHistory()
         setNodes((nds) => [...nds, {
@@ -1124,9 +1148,10 @@ export function NodeBoard({ onRefresh }: Props) {
         <div className="palette-list">
           {(() => {
             const q = skillSearch.trim().toLowerCase()
+            const draggable = skills.filter((s) => !s.system)
             const visible = q
-              ? skills.filter((s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q))
-              : skills
+              ? draggable.filter((s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q))
+              : draggable
             if (visible.length === 0)
               return <div className="palette-empty">{q ? 'No matches' : 'No skills loaded'}</div>
             return visible.map((skill) => (
@@ -1248,6 +1273,7 @@ export function NodeBoard({ onRefresh }: Props) {
               })()}
             </div>
           ) : (
+            <CustomBlocksContext.Provider value={customBlocks}>
             <SetDirtyContext.Provider value={() => setDirty(true)}>
             <IsRunningContext.Provider value={isRunning}>
             <RunContext.Provider value={runState}>
@@ -1309,6 +1335,7 @@ export function NodeBoard({ onRefresh }: Props) {
             </RunContext.Provider>
             </IsRunningContext.Provider>
             </SetDirtyContext.Provider>
+            </CustomBlocksContext.Provider>
           )}
         </div>
       </div>
@@ -1532,6 +1559,50 @@ export function NodeBoard({ onRefresh }: Props) {
               </div>
             ))}
           </div>
+        </div>
+
+        <div className="palette-tools-section">
+          <div className="palette-tools-header">Custom Blocks</div>
+          {customBlocks.length === 0 ? (
+            <div className="palette-empty" style={{ fontSize: 11, padding: '8px 10px' }}>
+              Ask Claude in the terminal to create a custom block, or add a JSON file to ~/.claude/skilltree/blocks/
+            </div>
+          ) : (
+            <div className="palette-tools-list">
+              {customBlocks.map((def) => (
+                <div
+                  key={def.id}
+                  className={`palette-item custom-block-palette-item ${isRunning || !activeFlow ? 'disabled' : ''}`}
+                  draggable={!isRunning && !!activeFlow}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('application/skilltree-block', JSON.stringify({ blockType: 'custom', blockDefinitionId: def.id }))
+                    e.dataTransfer.effectAllowed = 'copy'
+                  }}
+                  title={def.description}
+                >
+                  <span className="palette-item-name" style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: '50%', background: def.color ?? '#a855f7', flexShrink: 0, display: 'inline-block' }} />
+                    {def.name}
+                  </span>
+                  <button
+                    className="custom-block-delete-btn"
+                    title={`Delete ${def.name}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      // Optimistic removal — update UI before the async Go call
+                      setCustomBlocks(customBlocks.filter(b => b.id !== def.id))
+                      DeleteCustomBlock(def.id).catch(() => {
+                        // Revert on failure
+                        setCustomBlocks(customBlocks)
+                      })
+                    }}
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="palette-tools-section">

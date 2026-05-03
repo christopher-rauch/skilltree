@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"maps"
@@ -339,6 +341,106 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 		a.emitTerminal(fmt.Sprintf("\x1b[2m  stored in {{%s}}\x1b[0m\r\n", responseVar))
 		runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
 		return
+
+	case "custom-block":
+		blockID, _ := node.Data["blockDefinitionId"].(string)
+		if blockID == "" {
+			a.emitTerminal("\x1b[33m⚠ Custom block has no definition ID — skipping\x1b[0m\r\n")
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		}
+		blocks, err := a.GetCustomBlocks()
+		if err != nil {
+			a.emitTerminal(fmt.Sprintf("\x1b[31m✗ Could not load custom blocks: %s\x1b[0m\r\n", err.Error()))
+			runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+			return
+		}
+		var def *CustomBlockDef
+		for i := range blocks {
+			if blocks[i].ID == blockID {
+				def = &blocks[i]
+				break
+			}
+		}
+		if def == nil {
+			a.emitTerminal(fmt.Sprintf("\x1b[31m✗ Custom block %q not found\x1b[0m\r\n", blockID))
+			runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+			return
+		}
+		// Build field values map (with variable substitution)
+		rawValues, _ := node.Data["fieldValues"].(map[string]interface{})
+		fieldVals := map[string]string{}
+		for _, f := range def.Fields {
+			val := ""
+			if v, ok := rawValues[f.Key]; ok {
+				val = fmt.Sprint(v)
+			} else if f.Default != nil {
+				val = fmt.Sprint(f.Default)
+			}
+			fieldVals[f.Key] = sub(val)
+		}
+		renderTpl := func(tpl string) string {
+			for k, v := range fieldVals {
+				tpl = strings.ReplaceAll(tpl, "{{"+k+"}}", v)
+			}
+			return sub(tpl)
+		}
+		switch def.Execution.Type {
+		case BlockExecClaudePrompt:
+			prompt := renderTpl(def.Execution.PromptTemplate)
+			if strings.TrimSpace(prompt) == "" {
+				a.emitTerminal("\x1b[33m⚠ Prompt template is empty — skipping\x1b[0m\r\n")
+				runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+				return
+			}
+			runErr = a.runClaudePrompt(ctx, claudePath, dir, prompt)
+		case BlockExecShellScript:
+			script := renderTpl(def.Execution.InlineScript)
+			if def.Execution.InlineField != "" {
+				script = fieldVals[def.Execution.InlineField]
+			}
+			if strings.TrimSpace(script) == "" {
+				a.emitTerminal("\x1b[33m⚠ No script content — skipping\x1b[0m\r\n")
+				runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+				return
+			}
+			// Write inline script to a temp file and run it
+			tmp, err := os.CreateTemp("", "skilltree-block-*.sh")
+			if err != nil {
+				runErr = err
+				break
+			}
+			tmp.WriteString(script)
+			tmp.Close()
+			os.Chmod(tmp.Name(), 0755)
+			defer os.Remove(tmp.Name())
+			runErr = a.runShellScript(ctx, dir, tmp.Name())
+		case BlockExecHTTPRequest:
+			method := def.Execution.Method
+			if method == "" {
+				method = "GET"
+			}
+			rawURL := renderTpl(def.Execution.URLTemplate)
+			bodyStr := renderTpl(def.Execution.BodyTemplate)
+			req, err := http.NewRequestWithContext(ctx, method, rawURL, bytes.NewReader([]byte(bodyStr)))
+			if err != nil {
+				runErr = err
+				break
+			}
+			client := &http.Client{Timeout: 30 * time.Second}
+			resp, err := client.Do(req)
+			if err != nil {
+				runErr = err
+				break
+			}
+			defer resp.Body.Close()
+			respBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			a.emitTerminal(fmt.Sprintf("\x1b[2m  HTTP %d\x1b[0m\r\n%s\r\n", resp.StatusCode, string(respBytes)))
+		default:
+			a.emitTerminal(fmt.Sprintf("\x1b[33m⚠ Unknown execution type: %s — skipping\x1b[0m\r\n", def.Execution.Type))
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		}
 
 	case "block-gate":
 		message, _ := node.Data["message"].(string)
@@ -736,6 +838,43 @@ func (a *App) resolveSkillPrompt(skillName, argumentValue string) string {
 	return "/" + skillName
 }
 
+// clStreamEvent is one JSON line from claude -p --output-format stream-json.
+type clStreamEvent struct {
+	Type    string `json:"type"`
+	Message struct {
+		Content []struct {
+			Type  string          `json:"type"`
+			Text  string          `json:"text,omitempty"`
+			Name  string          `json:"name,omitempty"`  // tool_use
+			Input json.RawMessage `json:"input,omitempty"` // tool_use
+		} `json:"content"`
+	} `json:"message"`
+	Subtype string `json:"subtype,omitempty"`
+	Result  string `json:"result,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// toolSummary extracts a short description from a tool_use input JSON.
+func toolSummary(_ string, raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	for _, key := range []string{"command", "file_path", "query", "url", "pattern", "description"} {
+		if v, ok := m[key].(string); ok && v != "" {
+			v = strings.SplitN(v, "\n", 2)[0] // first line only
+			if len(v) > 72 {
+				v = v[:69] + "…"
+			}
+			return ": " + v
+		}
+	}
+	return ""
+}
+
 func (a *App) runClaudePrompt(ctx context.Context, claudePath, dir, prompt string) error {
 	fullPath := os.Getenv("PATH")
 	if out, err := exec.Command(os.Getenv("SHELL"), "-l", "-c", "echo $PATH").Output(); err == nil {
@@ -744,7 +883,10 @@ func (a *App) runClaudePrompt(ctx context.Context, claudePath, dir, prompt strin
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, claudePath, "-p", prompt)
+	cmd := exec.CommandContext(ctx, claudePath, "-p", prompt,
+		"--output-format", "stream-json",
+		"--verbose",
+	)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
 		"TERM=xterm-256color",
@@ -758,11 +900,45 @@ func (a *App) runClaudePrompt(ctx context.Context, claudePath, dir, prompt strin
 		return err
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); a.pipeToTerminal(stdout) }()
-	go func() { defer wg.Done(); a.pipeToTerminal(stderr) }()
-	wg.Wait()
+	// Pipe stderr (warnings/errors from claude itself)
+	go a.pipeToTerminal(stderr)
+
+	// Parse stream-json from stdout line by line
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 4<<20), 4<<20) // 4 MB — verbose system events can be large
+
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			break
+		}
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var ev clStreamEvent
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			a.emitTerminal(line + "\r\n")
+			continue
+		}
+		switch ev.Type {
+		case "assistant":
+			for _, item := range ev.Message.Content {
+				switch item.Type {
+				case "text":
+					if t := strings.TrimSpace(item.Text); t != "" {
+						a.emitTerminal(strings.ReplaceAll(item.Text, "\n", "\r\n"))
+					}
+				case "tool_use":
+					sum := toolSummary(item.Name, item.Input)
+					a.emitTerminal(fmt.Sprintf("\r\n\x1b[2m  🔧 %s%s\x1b[0m\r\n", item.Name, sum))
+				}
+			}
+		case "result":
+			if ev.Subtype == "error" && ev.Error != "" {
+				a.emitTerminal(fmt.Sprintf("\r\n\x1b[31m  %s\x1b[0m\r\n", ev.Error))
+			}
+		}
+	}
 
 	return cmd.Wait()
 }

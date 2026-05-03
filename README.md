@@ -58,7 +58,7 @@ tar -xzf Skilltree-Linux-x64.tar.gz
 
 ## Features
 
-### Running Flows (Primary Feature)
+### Running Flows
 
 Click **Run** on any saved flow to execute it step by step — no export needed:
 
@@ -100,7 +100,7 @@ Beyond named skills, the builder provides 11 programmable blocks:
 
 Building blocks can be saved as **Library skills** — they are inlined into exported flows rather than referenced by name, keeping exports fully self-contained.
 
-### Exporting as Skill (Secondary Feature)
+### Exporting as Skill
 
 Convert any flow into a standalone `SKILL.md` that runs in any Claude Code session:
 

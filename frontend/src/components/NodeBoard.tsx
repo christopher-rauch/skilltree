@@ -32,10 +32,13 @@ import {
   NewFlowID,
   GenerateFlowSkill,
   SetBoardDirty,
+  RunFlow,
+  StopFlowRun,
 } from '../../wailsjs/go/main/App'
+import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   Plus, Save, Trash2, Download, ChevronDown, Check, X, Copy, AlertTriangle,
-  Type, StickyNote, Pen,
+  Type, StickyNote, Pen, Play, Square,
 } from 'lucide-react'
 import { ProjectScopeInfo } from './ProjectScopeInfo'
 import { GithubButton } from './GithubButton'
@@ -49,6 +52,9 @@ const nodeTypes = {
 }
 
 export const BadgeContext = createContext<Map<string, string>>(new Map())
+
+export type RunStatus = 'running' | 'done' | 'error'
+export const RunContext = createContext<Map<string, RunStatus>>(new Map())
 
 function computeNodeBadges(nodes: Node[], edges: Edge[]): Map<string, string> {
   const connectedIds = new Set<string>()
@@ -185,6 +191,7 @@ export function NodeBoard({ onRefresh }: Props) {
     selectedFlowId, setSelectedFlowId,
     setBoardDirty: setStoreBoardDirty,
     setOnSaveBoard, setOnDiscardBoard,
+    terminalOpen, setTerminalOpen,
   } = useStore()
 
   // Derive active flow
@@ -194,6 +201,30 @@ export function NodeBoard({ onRefresh }: Props) {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
 
   const nodeBadges = useMemo(() => computeNodeBadges(nodes, edges), [nodes, edges])
+
+  // Flow run state
+  const [runState, setRunState] = useState<Map<string, RunStatus>>(new Map())
+  const [isRunning, setIsRunning] = useState(false)
+
+  useEffect(() => {
+    EventsOn('run:node-active', (nodeId: string) =>
+      setRunState((prev) => new Map(prev).set(nodeId, 'running')))
+    EventsOn('run:node-done',   (nodeId: string) =>
+      setRunState((prev) => new Map(prev).set(nodeId, 'done')))
+    EventsOn('run:node-error',  (nodeId: string) =>
+      setRunState((prev) => new Map(prev).set(nodeId, 'error')))
+    EventsOn('run:done',    () => setIsRunning(false))
+    EventsOn('run:stopped', () => setIsRunning(false))
+    return () => {
+      EventsOff('run:node-active', 'run:node-done', 'run:node-error', 'run:done', 'run:stopped')
+    }
+  }, [])
+
+  // Clear run state when switching flows
+  useEffect(() => {
+    setRunState(new Map())
+    setIsRunning(false)
+  }, [selectedFlowId])
 
   // Annotation tools
   const [annotationTool, setAnnotationToolState] = useState<'text' | 'sticky' | 'pencil' | null>(null)
@@ -595,6 +626,34 @@ export function NodeBoard({ onRefresh }: Props) {
     setEdgeMenu(null)
   }
 
+  async function handleRun() {
+    if (!activeFlow || isRunning) return
+    setTerminalOpen(true)
+    setRunState(new Map())
+    setIsRunning(true)
+    const skillNodes = nodes.filter((n) => !n.type?.startsWith('annotation-'))
+    const runFlow = {
+      id: activeFlow.id,
+      name: flowName || activeFlow.name,
+      description: activeFlow.description ?? '',
+      contentHash: activeFlow.contentHash ?? '',
+      nodes: skillNodes.map((n) => ({
+        id: n.id, type: n.type ?? 'skill', position: n.position,
+        data: n.data as FlowNode['data'], width: n.width ?? 0, height: n.height ?? 0,
+      })),
+      edges: edges.map((e) => ({
+        id: e.id, source: e.source, target: e.target,
+        sourceHandle: e.sourceHandle ?? '', targetHandle: e.targetHandle ?? '',
+        animated: e.animated ?? true,
+      })),
+    }
+    await RunFlow(runFlow as any)
+  }
+
+  function handleStopRun() {
+    StopFlowRun()
+  }
+
   async function handleNewFlow() {
     const id = await NewFlowID()
     const flow: Flow = { id, name: 'New Skilltree', description: '', contentHash: '', nodes: [], edges: [] }
@@ -819,7 +878,7 @@ export function NodeBoard({ onRefresh }: Props) {
               <button
                 className={`btn-secondary toolbar-btn save-btn ${saved ? 'saved' : ''}`}
                 onClick={handleSave}
-                disabled={saving || !dirty}
+                disabled={saving || !dirty || isRunning}
                 title="Save skilltree"
               >
                 <span className={`save-icon ${saved ? 'hidden' : ''}`}><Save size={14} /></span>
@@ -829,13 +888,32 @@ export function NodeBoard({ onRefresh }: Props) {
               <button
                 className="btn-secondary toolbar-btn"
                 onClick={() => setShowExport(true)}
+                disabled={isRunning}
                 title="Export as skill"
               >
                 <Download size={14} /> Export
               </button>
+              {!isRunning ? (
+                <button
+                  className="btn-primary toolbar-btn"
+                  onClick={handleRun}
+                  title="Run skilltree step by step"
+                >
+                  <Play size={14} /> Run
+                </button>
+              ) : (
+                <button
+                  className="btn-danger toolbar-btn"
+                  onClick={handleStopRun}
+                  title="Stop run"
+                >
+                  <Square size={14} /> Stop
+                </button>
+              )}
               <button
                 className="btn-ghost toolbar-btn danger"
                 onClick={() => setConfirmDelete(true)}
+                disabled={isRunning}
                 title="Delete skilltree"
               >
                 <Trash2 size={14} />
@@ -908,6 +986,7 @@ export function NodeBoard({ onRefresh }: Props) {
               </button>
             </div>
           ) : (
+            <RunContext.Provider value={runState}>
             <BadgeContext.Provider value={nodeBadges}>
             <ReactFlow
               nodes={nodes}
@@ -959,6 +1038,7 @@ export function NodeBoard({ onRefresh }: Props) {
               )}
             </ReactFlow>
             </BadgeContext.Provider>
+            </RunContext.Provider>
           )}
         </div>
       </div>

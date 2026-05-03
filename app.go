@@ -24,6 +24,7 @@ type App struct {
 	boardDirty bool
 	mcpPort    int
 	term       termState
+	runCancel  context.CancelFunc
 }
 
 func NewApp() *App {

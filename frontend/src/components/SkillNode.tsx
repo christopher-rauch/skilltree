@@ -1,7 +1,7 @@
 import { useContext } from 'react'
 import { Handle, Position, NodeResizeControl, ResizeControlVariant } from '@xyflow/react'
 import { FlowNodeData } from '../types'
-import { BadgeContext } from './NodeBoard'
+import { BadgeContext, RunContext } from './NodeBoard'
 import './SkillNode.css'
 
 interface Props {
@@ -12,6 +12,12 @@ interface Props {
 
 export function SkillNode({ id, data, selected }: Props) {
   const badge = useContext(BadgeContext).get(id)
+  const runStatus = useContext(RunContext).get(id)
+
+  const badgeLabel = runStatus === 'done' ? '✓'
+    : runStatus === 'error' ? '✗'
+    : runStatus === 'running' ? '▶'
+    : badge ?? null
   const handleStyle = {
     width: 10,
     height: 10,
@@ -22,7 +28,11 @@ export function SkillNode({ id, data, selected }: Props) {
 
   return (
     <>
-      {badge && <div className="node-badge">{badge}</div>}
+      {badgeLabel && (
+        <div className={`node-badge${runStatus ? ` badge-${runStatus}` : ''}`}>
+          {badgeLabel}
+        </div>
+      )}
       {/* Handles sit outside the clipped inner div so they're never cut off */}
       <Handle type="target" position={Position.Top} style={handleStyle} />
       <Handle type="source" position={Position.Bottom} style={handleStyle} />
@@ -44,7 +54,7 @@ export function SkillNode({ id, data, selected }: Props) {
         />
       ))}
 
-      <div className={`skill-node ${selected ? 'selected' : ''}`}>
+      <div className={`skill-node ${selected ? 'selected' : ''} ${runStatus ?? ''}`}>
         <div className="node-body">
           <div className="node-name">{data.label || data.skillName}</div>
           {data.description && (

@@ -80,3 +80,50 @@
   background: var(--primary) !important;
   border-color: var(--primary) !important;
 }
+
+/* ── Run states ─────────────────────────────────────────────────────────── */
+
+.skill-node.running {
+  border-color: var(--amber);
+  animation: node-running-pulse 1.4s ease-in-out infinite;
+}
+
+.skill-node.done {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-ghost);
+}
+
+.skill-node.error {
+  border-color: var(--red);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.15);
+}
+
+@keyframes node-running-pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.15); }
+  50%       { box-shadow: 0 0 0 7px rgba(245, 158, 11, 0.3); }
+}
+
+.node-badge.badge-running {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--amber);
+  border-color: var(--amber);
+  animation: badge-running-blink 1s step-start infinite;
+}
+
+.node-badge.badge-done {
+  background: var(--primary);
+  color: #000;
+  border-color: var(--primary);
+  font-size: 11px;
+}
+
+.node-badge.badge-error {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--red);
+  border-color: var(--red);
+}
+
+@keyframes badge-running-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}

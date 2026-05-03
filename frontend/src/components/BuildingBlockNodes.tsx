@@ -502,17 +502,42 @@ export function OutputCaptureNode({ id, data, selected }: { id: string; data: Ou
 type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 const HTTP_METHODS: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']
 
-interface HttpHeader { name: string; value: string }
+interface HttpKV { name: string; value: string }
 
 interface HttpRequestData {
   label?: string
   method?: HttpMethod
-  url?: string
-  headers?: HttpHeader[]
+  url?: string          // base URL, no query string
+  queryParams?: HttpKV[]
+  headers?: HttpKV[]
   body?: string
   responseVar?: string
+  showParams?: boolean
   showHeaders?: boolean
   [key: string]: unknown
+}
+
+function buildFullUrl(base: string, params: HttpKV[]): string {
+  const active = params.filter((p) => p.name.trim())
+  if (active.length === 0) return base
+  const qs = active.map((p) => `${encodeURIComponent(p.name)}=${encodeURIComponent(p.value)}`).join('&')
+  return base + (base.includes('?') ? '&' : '?') + qs
+}
+
+function parseUrlIntoBase(raw: string): { base: string; queryParams: HttpKV[] } {
+  const qIdx = raw.indexOf('?')
+  if (qIdx < 0) return { base: raw, queryParams: [] }
+  const base = raw.slice(0, qIdx)
+  const qs = raw.slice(qIdx + 1)
+  const params: HttpKV[] = []
+  for (const part of qs.split('&')) {
+    if (!part) continue
+    const eqIdx = part.indexOf('=')
+    const name  = decodeURIComponent(eqIdx >= 0 ? part.slice(0, eqIdx) : part)
+    const value = decodeURIComponent(eqIdx >= 0 ? part.slice(eqIdx + 1) : '')
+    params.push({ name, value })
+  }
+  return { base, queryParams: params }
 }
 
 export function HttpRequestNode({ id, data, selected }: { id: string; data: HttpRequestData; selected: boolean }) {
@@ -521,14 +546,31 @@ export function HttpRequestNode({ id, data, selected }: { id: string; data: Http
   const runStatus = useContext(RunContext).get(id)
   const markDirty = useContext(SetDirtyContext)
 
-  const method = data.method ?? 'GET'
-  const headers: HttpHeader[] = (data.headers as HttpHeader[] | undefined) ?? []
-  const showBody = ['POST', 'PUT', 'PATCH'].includes(method)
+  const method      = data.method ?? 'GET'
+  const queryParams: HttpKV[] = (data.queryParams as HttpKV[] | undefined) ?? []
+  const headers: HttpKV[]     = (data.headers     as HttpKV[] | undefined) ?? []
+  const showBody    = ['POST', 'PUT', 'PATCH'].includes(method)
+  const showParams  = data.showParams  ?? false
   const showHeaders = data.showHeaders ?? false
+
+  const fullUrl = buildFullUrl(data.url ?? '', queryParams)
 
   function update(patch: Partial<HttpRequestData>) {
     updateNodeData(id, { ...data, ...patch })
     markDirty()
+  }
+
+  function handleUrlChange(raw: string) {
+    const { base, queryParams: parsed } = parseUrlIntoBase(raw)
+    if (parsed.length > 0) {
+      update({ url: base, queryParams: parsed })
+    } else {
+      update({ url: raw })
+    }
+  }
+
+  function setParam(idx: number, field: 'name' | 'value', val: string) {
+    update({ queryParams: queryParams.map((p, i) => i === idx ? { ...p, [field]: val } : p) })
   }
 
   function setHeader(idx: number, field: 'name' | 'value', val: string) {
@@ -557,33 +599,53 @@ export function HttpRequestNode({ id, data, selected }: { id: string; data: Http
         {/* Method selector */}
         <div className="block-http-methods nodrag nopan nowheel">
           {HTTP_METHODS.map((m) => (
-            <button
-              key={m}
-              className={`block-http-method ${method === m ? 'active' : ''} method-${m.toLowerCase()}`}
-              disabled={isRunning}
-              onClick={() => update({ method: m })}
-            >{m}</button>
+            <button key={m} className={`block-http-method ${method === m ? 'active' : ''} method-${m.toLowerCase()}`}
+              disabled={isRunning} onClick={() => update({ method: m })}>{m}</button>
           ))}
         </div>
 
-        {/* URL */}
+        {/* URL — shows base + serialised params; typing ?key=val auto-populates form */}
         <div className="block-url-row nodrag nopan nowheel">
           <input
             className="block-url-input nodrag nopan nowheel"
             placeholder="https://api.example.com/endpoint"
-            value={data.url ?? ''}
+            value={fullUrl}
             disabled={isRunning}
-            onChange={(e) => update({ url: e.target.value })}
+            onChange={(e) => handleUrlChange(e.target.value)}
             onMouseDown={(e) => e.stopPropagation()}
           />
         </div>
 
-        {/* Headers toggle */}
-        <button
-          className="block-http-section-toggle nodrag nopan"
-          onClick={() => update({ showHeaders: !showHeaders })}
-          disabled={isRunning}
-        >
+        {/* Query params */}
+        <button className="block-http-section-toggle nodrag nopan"
+          onClick={() => update({ showParams: !showParams })} disabled={isRunning}>
+          {showParams ? '▾' : '▸'} Query params {queryParams.length > 0 ? `(${queryParams.length})` : ''}
+        </button>
+        {showParams && (
+          <div className="block-var-list nodrag nopan nowheel">
+            {queryParams.map((p, i) => (
+              <div key={i} className="block-var-row">
+                <input className="block-var-name" placeholder="key" value={p.name} disabled={isRunning}
+                  onChange={(e) => setParam(i, 'name', e.target.value)} onMouseDown={(e) => e.stopPropagation()} />
+                <span className="block-var-eq">=</span>
+                <input className="block-var-value" placeholder="value" value={p.value} disabled={isRunning}
+                  onChange={(e) => setParam(i, 'value', e.target.value)} onMouseDown={(e) => e.stopPropagation()} />
+                <button className="block-var-remove" disabled={isRunning}
+                  onClick={() => update({ queryParams: queryParams.filter((_, j) => j !== i) })}>
+                  <X size={9} />
+                </button>
+              </div>
+            ))}
+            <button className="block-var-add nodrag nopan" disabled={isRunning}
+              onClick={() => update({ queryParams: [...queryParams, { name: '', value: '' }] })}>
+              <Plus size={10} /> Add param
+            </button>
+          </div>
+        )}
+
+        {/* Headers */}
+        <button className="block-http-section-toggle nodrag nopan"
+          onClick={() => update({ showHeaders: !showHeaders })} disabled={isRunning}>
           {showHeaders ? '▾' : '▸'} Headers {headers.length > 0 ? `(${headers.length})` : ''}
         </button>
         {showHeaders && (
@@ -610,28 +672,18 @@ export function HttpRequestNode({ id, data, selected }: { id: string; data: Http
 
         {/* Body */}
         {showBody && (
-          <textarea
-            className="block-textarea nodrag nopan nowheel"
-            style={{ minHeight: 60 }}
-            placeholder='{"key": "value"}'
-            value={data.body ?? ''}
-            disabled={isRunning}
-            onChange={(e) => update({ body: e.target.value })}
-            onMouseDown={(e) => e.stopPropagation()}
-          />
+          <textarea className="block-textarea nodrag nopan nowheel" style={{ minHeight: 60 }}
+            placeholder='{"key": "value"}' value={data.body ?? ''} disabled={isRunning}
+            onChange={(e) => update({ body: e.target.value })} onMouseDown={(e) => e.stopPropagation()} />
         )}
 
         {/* Response variable */}
         <div className="block-http-resp-row nodrag nopan nowheel">
           <span className="block-http-resp-label">Store as</span>
-          <span className="block-http-resp-brace">{'{{'}  </span>
-          <input
-            className="block-http-resp-var nodrag nopan nowheel"
-            value={data.responseVar ?? 'http_response'}
-            disabled={isRunning}
-            onChange={(e) => update({ responseVar: e.target.value })}
-            onMouseDown={(e) => e.stopPropagation()}
-          />
+          <span className="block-http-resp-brace">{'{{'}</span>
+          <input className="block-http-resp-var nodrag nopan nowheel"
+            value={data.responseVar ?? 'http_response'} disabled={isRunning}
+            onChange={(e) => update({ responseVar: e.target.value })} onMouseDown={(e) => e.stopPropagation()} />
           <span className="block-http-resp-brace">{'}}'}</span>
         </div>
       </div>

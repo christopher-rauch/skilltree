@@ -659,6 +659,23 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 				}
 				rawURL, _ := node.Data["url"].(string)
 				rawURL = applyExportVars(rawURL, exportVars)
+				// Append query params to URL for export display
+				if qpList, ok := node.Data["queryParams"].([]interface{}); ok && len(qpList) > 0 {
+					sep := "?"
+					if strings.Contains(rawURL, "?") {
+						sep = "&"
+					}
+					for _, item := range qpList {
+						if entry, ok := item.(map[string]interface{}); ok {
+							name, _ := entry["name"].(string)
+							value, _ := entry["value"].(string)
+							if name != "" {
+								rawURL += sep + applyExportVars(name, exportVars) + "=" + applyExportVars(value, exportVars)
+								sep = "&"
+							}
+						}
+					}
+				}
 				responseVar, _ := node.Data["responseVar"].(string)
 				if responseVar == "" {
 					responseVar = "http_response"

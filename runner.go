@@ -8,6 +8,7 @@ import (
 	"io"
 	"maps"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -248,6 +249,24 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 		responseVar, _ := node.Data["responseVar"].(string)
 		if responseVar == "" {
 			responseVar = "http_response"
+		}
+
+		// Merge queryParams into URL
+		if qpList, ok := node.Data["queryParams"].([]interface{}); ok && len(qpList) > 0 {
+			if u, err := url.Parse(rawURL); err == nil {
+				q := u.Query()
+				for _, item := range qpList {
+					if entry, ok := item.(map[string]interface{}); ok {
+						name, _ := entry["name"].(string)
+						value, _ := entry["value"].(string)
+						if strings.TrimSpace(name) != "" {
+							q.Add(sub(name), sub(value))
+						}
+					}
+				}
+				u.RawQuery = q.Encode()
+				rawURL = u.String()
+			}
 		}
 
 		a.emitTerminal(fmt.Sprintf("\x1b[2m  %s %s\x1b[0m\r\n", method, rawURL))

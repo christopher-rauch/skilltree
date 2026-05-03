@@ -8,7 +8,7 @@ import { Terminal, TerminalHandle } from './components/Terminal'
 import {
   GetGlobalSkills, GetProjectSkills, GetLibrarySkills, GetFlows,
   GetProjectDir, OpenProjectDirectory, ClearProjectDir, SaveTerminalToFile,
-  ClaudeAvailable,
+  ClaudeAvailable, GetCustomBlocks,
   NewFlowID, SaveFlow,
   GenerateFlowDescriptions,
   OpenURL,
@@ -33,6 +33,7 @@ function App() {
     boardDirty,
     onSaveBoard, onDiscardBoard,
     claudeAvailable, setClaudeAvailable,
+    setCustomBlocks,
   } = useStore()
 
   const [pendingView, setPendingView] = useState<'skills' | 'trees' | 'board' | null>(null)
@@ -84,6 +85,7 @@ function App() {
   useEffect(() => {
     GetProjectDir().then((d) => { if (d) setProjectDir(d) })
     ClaudeAvailable().then(setClaudeAvailable)
+    GetCustomBlocks().then((b) => setCustomBlocks(b as any)).catch(() => {})
     loadAll()
 
     // MCP events — Claude controlling the GUI
@@ -91,6 +93,7 @@ function App() {
     EventsOn('mcp:refresh', () => loadAll())
     EventsOn('run:done',    () => { setTimeout(() => terminalRef.current?.scrollToCursor(), 300) })
     EventsOn('run:stopped', () => { setTimeout(() => terminalRef.current?.scrollToCursor(), 300) })
+    EventsOn('blocks:updated', () => GetCustomBlocks().then((b) => setCustomBlocks(b as any)).catch(() => {}))
     EventsOn('mcp:open_flow', (id: string) => {
       setSelectedFlowId(id)
       setView('board')
@@ -105,6 +108,7 @@ function App() {
       EventsOff('mcp:refresh')
       EventsOff('run:done')
       EventsOff('run:stopped')
+      EventsOff('blocks:updated')
       EventsOff('mcp:open_flow')
       EventsOff('flow:description_updated')
     }

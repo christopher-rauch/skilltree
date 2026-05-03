@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { Skill, Flow, View, SkillScope } from './types'
+import { Skill, Flow, View, SkillScope, CustomBlockDef } from './types'
 
 interface AppState {
   view: View
@@ -38,6 +38,8 @@ interface AppState {
   setPreviewSkill: (s: { name: string; scope: SkillScope } | null) => void
   claudeAvailable: boolean
   setClaudeAvailable: (b: boolean) => void
+  customBlocks: CustomBlockDef[]
+  setCustomBlocks: (blocks: CustomBlockDef[]) => void
   updateFlowDescription: (id: string, description: string) => void
 
   upsertSkill: (skill: Skill) => void
@@ -81,6 +83,8 @@ export const useStore = create<AppState>((set) => ({
   setPreviewSkill: (previewSkill) => set({ previewSkill }),
   claudeAvailable: true,
   setClaudeAvailable: (claudeAvailable) => set({ claudeAvailable }),
+  customBlocks: [],
+  setCustomBlocks: (customBlocks) => set({ customBlocks }),
   updateFlowDescription: (id, description) =>
     set((state) => ({
       flows: state.flows.map((f) => f.id === id ? { ...f, description } : f),

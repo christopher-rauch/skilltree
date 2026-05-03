@@ -340,6 +340,106 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 		runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
 		return
 
+	case "custom-block":
+		blockID, _ := node.Data["blockDefinitionId"].(string)
+		if blockID == "" {
+			a.emitTerminal("\x1b[33m⚠ Custom block has no definition ID — skipping\x1b[0m\r\n")
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		}
+		blocks, err := a.GetCustomBlocks()
+		if err != nil {
+			a.emitTerminal(fmt.Sprintf("\x1b[31m✗ Could not load custom blocks: %s\x1b[0m\r\n", err.Error()))
+			runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+			return
+		}
+		var def *CustomBlockDef
+		for i := range blocks {
+			if blocks[i].ID == blockID {
+				def = &blocks[i]
+				break
+			}
+		}
+		if def == nil {
+			a.emitTerminal(fmt.Sprintf("\x1b[31m✗ Custom block %q not found\x1b[0m\r\n", blockID))
+			runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+			return
+		}
+		// Build field values map (with variable substitution)
+		rawValues, _ := node.Data["fieldValues"].(map[string]interface{})
+		fieldVals := map[string]string{}
+		for _, f := range def.Fields {
+			val := ""
+			if v, ok := rawValues[f.Key]; ok {
+				val = fmt.Sprint(v)
+			} else if f.Default != nil {
+				val = fmt.Sprint(f.Default)
+			}
+			fieldVals[f.Key] = sub(val)
+		}
+		renderTpl := func(tpl string) string {
+			for k, v := range fieldVals {
+				tpl = strings.ReplaceAll(tpl, "{{"+k+"}}", v)
+			}
+			return sub(tpl)
+		}
+		switch def.Execution.Type {
+		case BlockExecClaudePrompt:
+			prompt := renderTpl(def.Execution.PromptTemplate)
+			if strings.TrimSpace(prompt) == "" {
+				a.emitTerminal("\x1b[33m⚠ Prompt template is empty — skipping\x1b[0m\r\n")
+				runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+				return
+			}
+			runErr = a.runClaudePrompt(ctx, claudePath, dir, prompt)
+		case BlockExecShellScript:
+			script := renderTpl(def.Execution.InlineScript)
+			if def.Execution.InlineField != "" {
+				script = fieldVals[def.Execution.InlineField]
+			}
+			if strings.TrimSpace(script) == "" {
+				a.emitTerminal("\x1b[33m⚠ No script content — skipping\x1b[0m\r\n")
+				runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+				return
+			}
+			// Write inline script to a temp file and run it
+			tmp, err := os.CreateTemp("", "skilltree-block-*.sh")
+			if err != nil {
+				runErr = err
+				break
+			}
+			tmp.WriteString(script)
+			tmp.Close()
+			os.Chmod(tmp.Name(), 0755)
+			defer os.Remove(tmp.Name())
+			runErr = a.runShellScript(ctx, dir, tmp.Name())
+		case BlockExecHTTPRequest:
+			method := def.Execution.Method
+			if method == "" {
+				method = "GET"
+			}
+			rawURL := renderTpl(def.Execution.URLTemplate)
+			bodyStr := renderTpl(def.Execution.BodyTemplate)
+			req, err := http.NewRequestWithContext(ctx, method, rawURL, bytes.NewReader([]byte(bodyStr)))
+			if err != nil {
+				runErr = err
+				break
+			}
+			client := &http.Client{Timeout: 30 * time.Second}
+			resp, err := client.Do(req)
+			if err != nil {
+				runErr = err
+				break
+			}
+			defer resp.Body.Close()
+			respBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			a.emitTerminal(fmt.Sprintf("\x1b[2m  HTTP %d\x1b[0m\r\n%s\r\n", resp.StatusCode, string(respBytes)))
+		default:
+			a.emitTerminal(fmt.Sprintf("\x1b[33m⚠ Unknown execution type: %s — skipping\x1b[0m\r\n", def.Execution.Type))
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		}
+
 	case "block-gate":
 		message, _ := node.Data["message"].(string)
 		if message == "" {

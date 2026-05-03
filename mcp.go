@@ -280,7 +280,34 @@ func (s *mcpServer) callTool(name string, args map[string]any) (string, error) {
 			}
 		}
 		return "", fmt.Errorf("flow not found: %s", id)
+
+	case "list_custom_blocks":
+		blocks, err := s.app.GetCustomBlocks()
+		if err != nil {
+			return "", err
+		}
+		data, _ := json.MarshalIndent(blocks, "", "  ")
+		return string(data), nil
+
+	case "save_custom_block":
+		defStr := str(args, "definition")
+		var def CustomBlockDef
+		if err := json.Unmarshal([]byte(defStr), &def); err != nil {
+			return "", fmt.Errorf("invalid definition JSON: %w", err)
+		}
+		if err := s.app.SaveCustomBlock(def); err != nil {
+			return "", err
+		}
+		return "custom block saved: " + def.ID, nil
+
+	case "delete_custom_block":
+		id := str(args, "id")
+		if err := s.app.DeleteCustomBlock(id); err != nil {
+			return "", err
+		}
+		return "deleted: " + id, nil
 	}
+
 	return "", fmt.Errorf("unknown tool: %s", name)
 }
 
@@ -323,5 +350,11 @@ func (s *mcpServer) toolList() []map[string]any {
 				"id": str("Flow ID"), "skillName": str("Name for the generated skill"),
 				"scope": str("global or project"),
 			}, []string{"id", "skillName"}),
+		tool("list_custom_blocks", "List all custom building block definitions", nil, nil),
+		tool("save_custom_block", "Create or update a custom building block definition",
+			map[string]any{"definition": str("JSON string of the CustomBlockDef object")},
+			[]string{"definition"}),
+		tool("delete_custom_block", "Delete a custom building block by ID",
+			map[string]any{"id": str("Block ID")}, []string{"id"}),
 	}
 }

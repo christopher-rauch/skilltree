@@ -27,6 +27,7 @@ import { Flow, FlowNode, FlowEdge, Skill } from '../types'
 import { SkillNode } from './SkillNode'
 import { AnnotationTextNode, AnnotationStickyNode, AnnotationDrawingNode } from './AnnotationNodes'
 import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode, OutputCaptureNode, HttpRequestNode, ApprovalGateNode, MCPToolNode, ConditionNode, LoopNode } from './BuildingBlockNodes'
+import { CustomBlockNode } from './CustomBlockNode'
 import {
   SaveFlow,
   DeleteFlow,
@@ -62,6 +63,7 @@ const nodeTypes = {
   'block-mcp':       MCPToolNode,
   'block-condition': ConditionNode,
   'block-loop':      LoopNode,
+  'custom-block':    CustomBlockNode,
 }
 
 export const BadgeContext = createContext<Map<string, string>>(new Map())
@@ -70,6 +72,8 @@ export type RunStatus = 'running' | 'done' | 'error'
 export const RunContext = createContext<Map<string, RunStatus>>(new Map())
 export const IsRunningContext = createContext(false)
 export const SetDirtyContext = createContext<() => void>(() => {})
+import type { CustomBlockDef } from '../types'
+export const CustomBlocksContext = createContext<CustomBlockDef[]>([])
 
 function computeNodeBadges(nodes: Node[], edges: Edge[]): Map<string, string> {
   const connectedIds = new Set<string>()
@@ -227,6 +231,7 @@ export function NodeBoard({ onRefresh }: Props) {
     terminalOpen, setTerminalOpen,
     setView, setPreviewSkill,
     claudeAvailable,
+    customBlocks,
   } = useStore()
 
   // Derive active flow
@@ -727,6 +732,24 @@ export function NodeBoard({ onRefresh }: Props) {
           condition: { label: 'Condition',  height: 140, data: { condition: '' } },
           loop:      { label: 'Loop',       height: 160, data: { count: 3, prompt: '' } },
         }
+        if (blockType === 'custom') {
+          const defId = (JSON.parse(blockRaw) as { blockDefinitionId?: string }).blockDefinitionId ?? ''
+          const customDef = customBlocks.find((d) => d.id === defId)
+          const defaultVals: Record<string, string> = {}
+          customDef?.fields.forEach((f) => { if (f.default != null) defaultVals[f.key] = String(f.default) })
+          pushHistory()
+          setNodes((nds) => [...nds, {
+            id,
+            type: 'custom-block',
+            position,
+            width: 240,
+            height: Math.max(80, 44 + (customDef?.fields.length ?? 0) * 38),
+            data: { blockDefinitionId: defId, fieldValues: defaultVals, label: customDef?.name ?? 'Custom Block' },
+          }])
+          setDirty(true)
+          return
+        }
+
         const def = defaults[blockType] ?? defaults.text
         pushHistory()
         setNodes((nds) => [...nds, {
@@ -1248,6 +1271,7 @@ export function NodeBoard({ onRefresh }: Props) {
               })()}
             </div>
           ) : (
+            <CustomBlocksContext.Provider value={customBlocks}>
             <SetDirtyContext.Provider value={() => setDirty(true)}>
             <IsRunningContext.Provider value={isRunning}>
             <RunContext.Provider value={runState}>
@@ -1309,6 +1333,7 @@ export function NodeBoard({ onRefresh }: Props) {
             </RunContext.Provider>
             </IsRunningContext.Provider>
             </SetDirtyContext.Provider>
+            </CustomBlocksContext.Provider>
           )}
         </div>
       </div>
@@ -1533,6 +1558,31 @@ export function NodeBoard({ onRefresh }: Props) {
             ))}
           </div>
         </div>
+
+        {customBlocks.length > 0 && (
+          <div className="palette-tools-section">
+            <div className="palette-tools-header">Custom Blocks</div>
+            <div className="palette-tools-list">
+              {customBlocks.map((def) => (
+                <div
+                  key={def.id}
+                  className={`palette-item ${isRunning || !activeFlow ? 'disabled' : ''}`}
+                  draggable={!isRunning && !!activeFlow}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('application/skilltree-block', JSON.stringify({ blockType: 'custom', blockDefinitionId: def.id }))
+                    e.dataTransfer.effectAllowed = 'copy'
+                  }}
+                  title={def.description}
+                >
+                  <span className="palette-item-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: '50%', background: def.color ?? '#a855f7', flexShrink: 0, display: 'inline-block' }} />
+                    {def.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="palette-tools-section">
           <div className="palette-tools-header">Markups</div>

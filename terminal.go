@@ -48,6 +48,8 @@ type termState struct {
 	cmd     *exec.Cmd
 	dir     string
 	running bool
+	cols    uint16
+	rows    uint16
 }
 
 func (a *App) StartTerminal(cols, rows uint16) error {
@@ -140,6 +142,8 @@ func (a *App) StartTerminal(cols, rows uint16) error {
 	a.term.cmd = cmd
 	a.term.dir = dir
 	a.term.running = true
+	a.term.cols = cols
+	a.term.rows = rows
 
 	go func() {
 		buf := make([]byte, 4096)
@@ -226,6 +230,8 @@ func (a *App) TerminalResize(cols, rows uint16) error {
 	if a.term.ptmx == nil {
 		return nil
 	}
+	a.term.cols = cols
+	a.term.rows = rows
 	return pty.Setsize(a.term.ptmx, &pty.Winsize{Cols: cols, Rows: rows})
 }
 

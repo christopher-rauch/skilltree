@@ -1101,6 +1101,30 @@ func (a *App) SaveTerminalToFile(content string) error {
 	return os.WriteFile(path, []byte(content), 0644)
 }
 
+// GenerateSkillContent uses claude -p to generate a full SKILL.md for the
+// given natural-language description. Returns the raw markdown string.
+func (a *App) GenerateSkillContent(description string) (string, error) {
+	claudePath, err := shellWhich("claude")
+	if err != nil {
+		return "", fmt.Errorf("claude CLI not found")
+	}
+	prompt := "Generate a Claude Code skill in SKILL.md format.\n\n" +
+		"The skill should: " + description + "\n\n" +
+		"Requirements:\n" +
+		"- YAML frontmatter with name (kebab-case), description (one line), " +
+		"allowed-tools (comma-separated), argument-hint only if the skill takes a runtime argument\n" +
+		"- Body: clear numbered markdown steps Claude will follow when the skill is invoked\n" +
+		"- Return ONLY the raw SKILL.md content — no explanation, no code fences, nothing else"
+	out, err := exec.Command(claudePath, "-p", prompt).Output()
+	if err != nil {
+		return "", err
+	}
+	result := strings.TrimSpace(string(out))
+	// Strip any accidental code fences
+	result = regexp.MustCompile("(?s)^```[a-z]*\n(.+)\n```$").ReplaceAllString(result, "$1")
+	return strings.TrimSpace(result), nil
+}
+
 // SelectAnyFile opens a native file dialog with no type filter.
 func (a *App) SelectAnyFile() (string, error) {
 	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{

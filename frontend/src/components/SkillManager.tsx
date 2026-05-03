@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { Skill, SkillScope } from '../types'
 import { SkillEditor } from './SkillEditor'
@@ -12,12 +12,23 @@ interface Props {
 }
 
 export function SkillManager({ onRefresh }: Props) {
-  const { skills, activeScope, setActiveScope, setError, projectDir } = useStore()
+  const { skills, activeScope, setActiveScope, setError, projectDir, previewSkill, setPreviewSkill } = useStore()
   const [editing, setEditing] = useState<Skill | null>(null)
   const [creating, setCreating] = useState<SkillScope | null>(null)
   const [selected, setSelected] = useState<Skill | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<Skill | null>(null)
   const [projectPrompt, setProjectPrompt] = useState<{ action: 'create' | 'edit'; skill?: Skill } | null>(null)
+
+  // Handle preview requests from the Builder
+  useEffect(() => {
+    if (!previewSkill) return
+    const skill = skills.find((s) => s.name === previewSkill.name && s.scope === previewSkill.scope)
+    if (skill) {
+      setActiveScope(previewSkill.scope)
+      setSelected(skill)
+    }
+    setPreviewSkill(null)
+  }, [previewSkill])
 
   const scopeSkills = skills.filter((s) => s.scope === activeScope)
 
@@ -84,7 +95,8 @@ export function SkillManager({ onRefresh }: Props) {
           <button
             className={`btn-primary btn-sm scope-${activeScope}`}
             onClick={() => activeScope === 'project' ? setProjectPrompt({ action: 'create' }) : setCreating(activeScope)}
-            title="New skill"
+            disabled={activeScope === 'project' && !projectDir}
+            title={activeScope === 'project' && !projectDir ? 'Open a project first' : 'New skill'}
           >
             <Plus size={13} />
             New

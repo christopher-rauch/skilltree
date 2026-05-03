@@ -117,6 +117,14 @@ func (a *App) RunFlow(flow Flow) error {
 			a.runCap = nil
 			a.runCapMu.Unlock()
 			runtime.EventsEmit(a.ctx, "run:done")
+			// Separator + generous padding so Claude's 2-line prompt UI
+			// renders in the blank space and doesn't overwrite the separator.
+			a.emitTerminal("\r\n\x1b[38;5;240m─────────────────────────────────────────\x1b[0m\r\n\r\n")
+			a.term.mu.Lock()
+			if a.term.running && a.term.ptmx != nil {
+				a.term.ptmx.Write([]byte("\r\n")) //nolint
+			}
+			a.term.mu.Unlock()
 		}()
 		if err := a.executeFlow(ctx, flow); err != nil && ctx.Err() == nil {
 			a.emitTerminal(fmt.Sprintf("\r\n\x1b[1;31m✗ Run failed: %s\x1b[0m\r\n", err.Error()))
@@ -592,23 +600,38 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 		}
 		evalPrompt := "Evaluate the following condition and respond with ONLY the single word \"yes\" or \"no\", nothing else.\n\nCondition: " + condition
 		a.emitTerminal("\x1b[2m  evaluating condition…\x1b[0m\r\n")
-		if err := a.runClaudePrompt(ctx, claudePath, dir, evalPrompt); err != nil {
+
+		// Swap in a fresh buffer so we only capture the evaluation response.
+		evalBuf := &strings.Builder{}
+		a.runCapMu.Lock()
+		prevCap := a.runCap
+		a.runCap = evalBuf
+		a.runCapMu.Unlock()
+
+		evalErr := a.runClaudePrompt(ctx, claudePath, dir, evalPrompt)
+
+		// Restore the main buffer and grab the evaluation output.
+		a.runCapMu.Lock()
+		evalOutput := evalBuf.String()
+		a.runCap = prevCap
+		if prevCap != nil {
+			prevCap.WriteString(evalOutput) // keep full run log intact
+		}
+		a.runCapMu.Unlock()
+
+		if evalErr != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			a.emitTerminal(fmt.Sprintf("\r\n\x1b[1;31m✗ Condition evaluation failed: %s\x1b[0m\r\n", err.Error()))
+			a.emitTerminal(fmt.Sprintf("\r\n\x1b[1;31m✗ Condition evaluation failed: %s\x1b[0m\r\n", evalErr.Error()))
 			runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
 			return
 		}
-		// Read the last captured output to determine yes/no.
-		a.runCapMu.Lock()
-		var captured string
-		if a.runCap != nil {
-			captured = a.runCap.String()
-		}
-		a.runCapMu.Unlock()
-		answer := strings.ToLower(strings.TrimSpace(captured))
-		if strings.HasPrefix(answer, "y") {
+
+		// Strip ANSI codes and whitespace, then check for "yes" anywhere in the response.
+		ansiRe := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+		cleaned := strings.ToLower(strings.TrimSpace(ansiRe.ReplaceAllString(evalOutput, "")))
+		if strings.Contains(cleaned, "yes") {
 			activeHandle = "source-yes"
 			a.emitTerminal("\x1b[1;32m→ yes\x1b[0m\r\n")
 		} else {
@@ -700,7 +723,7 @@ func (a *App) runShellScript(ctx context.Context, dir, scriptPath string) error 
 // Library skills inline their body; global/project skills invoke by name.
 // argumentValue is appended when provided.
 func (a *App) resolveSkillPrompt(skillName, argumentValue string) string {
-	libPath := filepath.Join(librarySkillsDir(), skillName, "SKILL.md")
+	libPath := filepath.Join(a.librarySkillsDir(), skillName, "SKILL.md")
 	if skill, err := parseSkillFile(libPath, "library"); err == nil && skill.Body != "" {
 		if argumentValue != "" {
 			return skill.Body + "\n\nArgument: " + argumentValue

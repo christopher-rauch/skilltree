@@ -142,6 +142,12 @@
   max-height: 600px;
 }
 
+.terminal-panel.terminal-panel-collapsed {
+  min-height: unset;
+  max-height: unset;
+  height: auto !important;
+}
+
 .terminal-header {
   display: flex;
   align-items: center;
@@ -167,12 +173,17 @@
   flex: 1;
 }
 
+.terminal-save,
 .terminal-reset,
 .terminal-close {
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-3);
+}
+
+.terminal-save:hover {
+  color: var(--primary);
 }
 
 .terminal-reset:hover {
@@ -248,6 +259,7 @@
   color: var(--text);
 }
 
+.btn-ghost.terminal-save,
 .btn-ghost.terminal-reset,
 .btn-ghost.terminal-close {
   padding: 0;
@@ -284,6 +296,26 @@
 }
 
 /* ---- Toast/Error bar ---- */
+.claude-missing-bar {
+  background: rgba(245, 158, 11, 0.08);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.3);
+  color: var(--amber);
+  padding: 8px 16px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.claude-missing-bar code {
+  font-family: var(--mono);
+  font-size: 11px;
+  background: rgba(245, 158, 11, 0.12);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
 .error-bar {
   background: var(--red-ghost);
   border-bottom: 1px solid var(--red);

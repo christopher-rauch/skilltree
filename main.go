@@ -39,8 +39,8 @@ func main() {
 
 	err := wails.Run(&options.App{
 		Title:            "Skilltree",
-		Width:            1280,
-		Height:           800,
+		Width:            1920,
+		Height:           1200,
 		MinWidth:         900,
 		MinHeight:        600,
 		BackgroundColour: &options.RGBA{R: 10, G: 10, B: 10, A: 1},

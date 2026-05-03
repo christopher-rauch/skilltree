@@ -1,54 +1,18 @@
 # Skilltree
 
-A visual skill and workflow manager for [Claude Code](https://claude.ai/code). Build, connect, and export Claude skills as node-based skilltrees — with a built-in Claude terminal and full MCP integration.
+A visual workflow builder and runner for [Claude Code](https://claude.ai/code). Design, run, and export multi-step AI workflows as node-based skilltrees — with live step-by-step execution, a built-in Claude terminal, and full MCP integration.
 
 Built with [Wails](https://wails.io) (Go + React/TypeScript).
 
 ---
 
-## Features
+## What It Does
 
-### Skills Manager
-- Browse, create, edit, and delete Claude skills (`SKILL.md` files)
-- Three scopes with color-coded tabs and badges:
-  - **Global** (`~/.claude/skills/`) — available in all Claude Code sessions
-  - **Project** (`.claude/skills/`) — scoped to the open project; collaborator warnings on create, edit, and delete
-  - **Library** (`~/.claude/skilltree/skills/`) — private building blocks used inside skilltrees; inlined into exported skill files rather than invoked by name, so exports are fully self-contained
-- Changing a skill's scope prompts **Move** or **Duplicate** — no silent copies
-- Full frontmatter editing: name, description, argument hints, allowed tools, and body
+Skilltree lets you visually compose Claude Code skills into executable workflows. The core loop is:
 
-### Skilltrees (Builder)
-- Drag skills from the palette onto a canvas and connect them into directed workflows
-- **Single-input constraint**: each node may have at most one incoming connection; the UI blocks multi-input connections and disables "Reverse direction" when it would violate this
-- **Concurrent phases**: nodes at the same topological level are grouped as parallel steps
-- **Cycle prevention**: connecting nodes that would form a loop is blocked
-- **Phase badges**: circular number badges on each connected node show its position in the flow (`1`, `2a`, `2b`, …); letters follow branch lineage consistently down the tree; free-floating nodes show no badge
-- Resize nodes by dragging corner handles; sizes persist on save
-- Right-click any node or connection for a context menu (delete, duplicate, reverse direction)
-- **Right-click marquee selection**: hold right-click and drag on the canvas to rubber-band select multiple nodes; drag selected nodes together
-- Unsaved-change guards on navigation and skilltree switching
-- Gap detection: a warning indicator flags unconnected skill nodes or disconnected subgraphs
-
-### Canvas Annotation Tools
-Three non-destructive tools in the Builder palette that persist with the canvas but are invisible to the export and flow logic:
-- **Text** — click the canvas to drop an editable text label; double-click to re-edit
-- **Sticky Note** — same as text but with a colored card; five color swatches to choose from; double-click to edit
-- **Pencil** — hold left-click and drag to draw freehand strokes; stroke is committed as a resizable drawing node on release
-
-### Export as Skill
-- Converts a skilltree into a new `SKILL.md` that sequences all connected skills
-- **Library skills are inlined**: their body is embedded directly rather than referenced by name, making the exported file fully self-contained and runnable in any Claude Code session without extra configuration
-- Sequential steps use phase ordering; concurrent nodes within the same phase are explicitly grouped
-- Export to global or project scope
-
-### Built-in Claude Terminal
-- Collapsible, resizable terminal panel running a live `claude` CLI instance
-- Claude is given a `CLAUDE.md` context file describing the app and all available actions
-- **MCP integration**: a local MCP server exposes GUI control tools so Claude can navigate views, create/delete skills and flows, open skilltrees, and export — all from the terminal
-
-### Auto-Descriptions
-- When a valid `claude` CLI is available, missing skilltree descriptions are generated automatically using `claude -p` in non-interactive mode
-- Descriptions are cached by content hash and only regenerate when the skilltree's structure changes
+**Build** → drag skills and building blocks onto a canvas, connect them into a flow  
+**Run** → execute the flow step-by-step directly in the app with live terminal output  
+**Export** → optionally package the flow as a self-contained `SKILL.md` for use anywhere
 
 ---
 
@@ -63,7 +27,7 @@ Download the latest release for your platform from the [Releases](https://github
 | `Skilltree-Windows-x64.zip` | Windows 64-bit |
 | `Skilltree-Linux-x64.tar.gz` | Linux 64-bit |
 
-You also need [Claude Code](https://claude.ai/code) installed for the terminal and auto-descriptions:
+You also need [Claude Code](https://claude.ai/code) installed for execution, the terminal, and description generation:
 
 ```bash
 npm i -g @anthropic-ai/claude-code
@@ -71,28 +35,133 @@ npm i -g @anthropic-ai/claude-code
 
 ### macOS
 
-Skilltree is not notarized, so macOS will block it on first launch. After unzipping, run this command once to clear the quarantine flag:
+After unzipping, clear the quarantine flag once:
 
 ```bash
 xattr -cr /Applications/Skilltree.app
 ```
 
-Then double-click to open normally. If you placed the app somewhere other than `/Applications`, adjust the path accordingly.
-
-> Alternatively: right-click the app → **Open** → **Open** in the dialog that appears. This works as a one-time override without using the terminal.
+Or right-click the app → **Open** → **Open** in the dialog.
 
 ### Windows
 
-Unzip the archive and run `skilltree.exe`. Windows SmartScreen may show a warning on first launch — click **More info → Run anyway**.
+Unzip and run `skilltree.exe`. Click **More info → Run anyway** if SmartScreen appears.
 
 ### Linux
-
-Extract the archive and run the `skilltree` binary:
 
 ```bash
 tar -xzf Skilltree-Linux-x64.tar.gz
 ./skilltree
 ```
+
+---
+
+## Features
+
+### Running Flows (Primary Feature)
+
+Click **Run** on any saved flow to execute it step by step — no export needed:
+
+- Each node runs as a `claude -p` call, streaming output live to the built-in terminal
+- **Phase badges** on each node show its position in the flow (`1`, `2a`, `2b`, …)
+- Active nodes pulse amber; completed nodes show a green ✓; errors show a red ✗
+- **Concurrent phases** run in parallel goroutines, with phase headers in the terminal
+- **Stop** cancels in-flight execution at any point
+- After the run, the interactive Claude terminal is ready for follow-up without losing context
+
+### Visual Builder
+
+Drag skills and building blocks onto a canvas and connect them into directed workflows:
+
+- **Single-input constraint** — each node has at most one incoming connection; the builder prevents cycles and multi-input connections
+- **Concurrent phases** — nodes at the same topological level run in parallel
+- **Argument inputs** — skill nodes with `argument-hint` show one labeled input field per argument, pre-filled before running
+- **Undo / Redo** (⌘Z / ⌘⇧Z) and **Copy / Paste** (⌘C / ⌘V) for nodes and edges
+- **Right-click marquee** selection with multi-node drag
+- Right-click context menus on nodes and edges
+
+### Building Blocks
+
+Beyond named skills, the builder provides 11 programmable blocks:
+
+| Block | Purpose |
+|---|---|
+| **Prompt** | Raw Claude instructions — pass text directly to `claude -p` |
+| **Run Command** | Execute a shell script |
+| **File Input** | Read a file and pass its content as context |
+| **Context Injector** | Append static context to the session for all downstream steps |
+| **Variable** | Define `{{name}}` placeholders substituted into downstream content |
+| **Output Capture** | Save terminal output to a file or the macOS clipboard |
+| **HTTP Request** | Call a REST endpoint; store the response as `{{variable}}` |
+| **Approval Gate** | Pause the run and require user confirmation before continuing |
+| **MCP Tool** | Directly invoke any configured MCP server tool |
+| **Condition** | Branch Yes/No based on Claude's evaluation of a condition |
+| **Loop** | Repeat a prompt N times with `{{iteration}}` substitution |
+
+Building blocks can be saved as **Library skills** — they are inlined into exported flows rather than referenced by name, keeping exports fully self-contained.
+
+### Exporting as Skill (Secondary Feature)
+
+Convert any flow into a standalone `SKILL.md` that runs in any Claude Code session:
+
+- Skill nodes invoke by name (`/skill-name`); Library skill bodies are embedded inline
+- Building block content is embedded directly — no external dependencies
+- Variable substitutions are resolved; HTTP requests and conditions are documented
+- Export to Global (`~/.claude/skills/`) or Project (`.claude/skills/`) scope
+
+### Skills Manager
+
+- Browse, create, edit, and delete Claude skills across three scopes:
+  - **Global** (`~/.claude/skills/`) — available in all Claude Code sessions
+  - **Project** (`.claude/skills/`) — scoped to the open project with collaborator warnings
+  - **Library** (`~/.claude/skilltree/skills/`) — private building blocks inlined on export
+- **Create skills** via form, raw markdown paste, or **Generate with Claude** (describe what you want; Claude fills all fields)
+- Color-coded scope tabs, badges, and buttons; scope-change prompts (Move vs Duplicate)
+- Skill search by name or description in the Builder palette
+- Right-click any palette skill to preview it on the Skills tab
+
+### Skilltrees Gallery
+
+- Browse all saved flows with auto-generated descriptions, node counts, and phase info
+- **Duplicate** any flow with one click
+- Recent flows shown on the empty Builder canvas for quick access
+
+### Canvas Markups
+
+Non-destructive annotations that persist with the canvas but are excluded from exports:
+
+- **Text** — click to drop an editable label; double-click to re-edit
+- **Sticky Note** — colored card with five color options
+- **Pencil** — freehand drawing committed as a resizable node on release
+
+### Built-in Claude Terminal
+
+- Collapsible, resizable terminal panel with a live `claude` CLI session
+- Stays populated when collapsed — re-open without losing context
+- **Save session** to a file via the download button in the terminal header
+- **MCP integration** — Claude can control the GUI (navigate, create/delete skills and flows, open and export skilltrees) from the terminal
+
+### Settings
+
+Configure skill paths via the gear icon in the header:
+
+- Global skills folder (default: `~/.claude/skills`)
+- Library skills folder (default: `~/.claude/skilltree/skills`)
+- Project skills relative path (default: `.claude/skills`)
+
+---
+
+## Building Blocks — Variable Substitution
+
+Variables defined in a **Variable** block flow through to any downstream:
+
+- Prompt block content
+- File Input instructions
+- Context Injector content
+- HTTP Request URLs, headers, and body
+- Skill node argument values
+
+Use `{{variable_name}}` syntax anywhere in those fields.
 
 ---
 
@@ -152,36 +221,9 @@ allowed-tools: Read, Write, Bash
 Instructions for Claude...
 ```
 
-### Skilltrees
-
-Skilltrees are JSON files stored in `~/.claude/skilltree/flows/`. Each file records node positions, sizes, edge connections, and canvas annotations. Exporting generates a new `SKILL.md` with phase-ordered instructions. Library skills are inlined; global/project skills are invoked by name:
-
-```markdown
-# Workflow: My Workflow
-
-Execute the phases below in order. Within each phase, all listed skills
-can be run concurrently...
-
-## Phase 1
-### setup (library skill — inlined)
-[body of the library skill embedded here]
-
-## Phase 2 *(concurrent)*
-### skill-b
-Invoke `/skill-b`.
-### skill-c
-Invoke `/skill-c`.
-```
-
 ### MCP Integration
 
-When the terminal opens, Skilltree:
-
-1. Starts a local HTTP MCP server on a random port
-2. Creates a temp session directory with a `CLAUDE.md` context file and a `.claude/settings.json` pointing to the server via a Node.js stdio proxy
-3. Spawns `claude` in that directory
-
-Claude can then use the `skilltree-gui` MCP tools:
+When the terminal opens, Skilltree starts a local MCP server and spawns `claude` with it configured. Claude can use the `skilltree-gui` tools:
 
 | Tool | Description |
 |---|---|
@@ -201,26 +243,30 @@ Claude can then use the `skilltree-gui` MCP tools:
 
 ```
 skilltree/
-├── app.go          # Core Go backend — skills, flows, file I/O, description generation
+├── app.go          # Skills, flows, file I/O, description generation, settings
+├── runner.go       # Flow execution engine — step-by-step claude -p runs
+├── mcp_client.go   # MCP client for tool discovery and invocation
+├── mcp.go          # MCP HTTP server + GUI tool definitions
+├── settings.go     # User-configurable path settings
 ├── terminal.go     # PTY terminal management and MCP session setup
-├── mcp.go          # MCP HTTP server + tool definitions
 ├── main.go         # Wails app config + stdio MCP proxy mode
 ├── wails.json      # Wails project config
 └── frontend/
     └── src/
-        ├── App.tsx                    # Shell, nav, unsaved-change guards
+        ├── App.tsx                    # Shell, nav, terminal, unsaved-change guards
         ├── store.ts                   # Zustand global state
         ├── types.ts                   # Shared TypeScript types
         └── components/
             ├── SkillManager.tsx       # Skills CRUD view
-            ├── SkillEditor.tsx        # Create/edit skill modal
+            ├── SkillEditor.tsx        # Create/edit skill modal (form + markdown + generate)
             ├── NodeBoard.tsx          # Builder canvas (React Flow)
-            ├── SkillNode.tsx          # Custom React Flow node
-            ├── AnnotationNodes.tsx    # Text, sticky, and drawing annotation nodes
+            ├── SkillNode.tsx          # Custom skill node with argument inputs
+            ├── AnnotationNodes.tsx    # Text, sticky, and drawing markup nodes
+            ├── BuildingBlockNodes.tsx # All 11 building block node types
             ├── SkillTrees.tsx         # Skilltrees gallery page
+            ├── Settings.tsx           # Path configuration modal
             ├── Terminal.tsx           # xterm.js terminal component
-            ├── ProjectScopeInfo.tsx   # Shared project scope UI
-            └── GithubButton.tsx       # GitHub link button
+            └── ...
 ```
 
 ---

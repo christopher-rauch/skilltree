@@ -75,6 +75,58 @@
   -webkit-font-smoothing: subpixel-antialiased;
 }
 
+/* ── Argument input ──────────────────────────────────────────────────────── */
+
+.node-arg {
+  padding: 5px 10px 8px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.node-arg-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.node-arg-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  font-family: var(--mono);
+  white-space: nowrap;
+  min-width: 48px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.node-arg-input {
+  flex: 1;
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text);
+  transition: border-color 0.15s;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.node-arg-input:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.node-arg-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Handle hover — applied via React Flow's .react-flow__handle selector */
 .react-flow__handle:hover {
   background: var(--primary) !important;

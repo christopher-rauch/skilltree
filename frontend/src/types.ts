@@ -11,6 +11,8 @@ export interface FlowNodeData {
   skillName: string
   label: string
   description: string
+  argumentHint?: string
+  argumentValue?: string
   [key: string]: unknown
 }
 
@@ -31,6 +33,7 @@ export interface Flow {
   nodes: FlowNode[]
   edges: FlowEdge[]
   annotations?: FlowAnnotation[]
+  updatedAt?: number  // Unix ms, from file mtime
 }
 
 export interface FlowNode {

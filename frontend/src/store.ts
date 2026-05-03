@@ -34,6 +34,10 @@ interface AppState {
   setTerminalOpen: (b: boolean) => void
   setTerminalHeight: (h: number) => void
   setTerminalAlive: (b: boolean) => void
+  previewSkill: { name: string; scope: SkillScope } | null
+  setPreviewSkill: (s: { name: string; scope: SkillScope } | null) => void
+  claudeAvailable: boolean
+  setClaudeAvailable: (b: boolean) => void
   updateFlowDescription: (id: string, description: string) => void
 
   upsertSkill: (skill: Skill) => void
@@ -51,8 +55,8 @@ export const useStore = create<AppState>((set) => ({
   selectedFlowId: null,
   loading: false,
   error: null,
-  terminalOpen: false,
-  terminalHeight: 260,
+  terminalOpen: true,
+  terminalHeight: 390,
   terminalAlive: false,
 
   boardDirty: false,
@@ -73,6 +77,10 @@ export const useStore = create<AppState>((set) => ({
   setTerminalOpen: (terminalOpen) => set({ terminalOpen }),
   setTerminalHeight: (terminalHeight) => set({ terminalHeight }),
   setTerminalAlive: (terminalAlive) => set({ terminalAlive }),
+  previewSkill: null,
+  setPreviewSkill: (previewSkill) => set({ previewSkill }),
+  claudeAvailable: true,
+  setClaudeAvailable: (claudeAvailable) => set({ claudeAvailable }),
   updateFlowDescription: (id, description) =>
     set((state) => ({
       flows: state.flows.map((f) => f.id === id ? { ...f, description } : f),

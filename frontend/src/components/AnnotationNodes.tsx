@@ -12,7 +12,9 @@ export function AnnotationTextNode({ id, data, selected }: { id: string; data: T
   const taRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    if (editing) taRef.current?.select()
+    if (!editing) return
+    const t = setTimeout(() => { taRef.current?.focus(); taRef.current?.select() }, 30)
+    return () => clearTimeout(t)
   }, [editing])
 
   const commit = useCallback((text: string) => {
@@ -27,7 +29,6 @@ export function AnnotationTextNode({ id, data, selected }: { id: string; data: T
           ref={taRef}
           className="ann-textarea nodrag nopan nowheel"
           defaultValue={data.text ?? ''}
-          autoFocus
           onBlur={(e) => commit(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Escape') commit((e.target as HTMLTextAreaElement).value) }}
         />

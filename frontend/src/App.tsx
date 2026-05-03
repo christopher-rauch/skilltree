@@ -4,17 +4,19 @@ import { useStore } from './store'
 import { SkillManager } from './components/SkillManager'
 import { NodeBoard } from './components/NodeBoard'
 import { SkillTrees } from './components/SkillTrees'
-import { Terminal } from './components/Terminal'
+import { Terminal, TerminalHandle } from './components/Terminal'
 import {
   GetGlobalSkills, GetProjectSkills, GetLibrarySkills, GetFlows,
-  GetProjectDir, OpenProjectDirectory, ClearProjectDir,
+  GetProjectDir, OpenProjectDirectory, ClearProjectDir, SaveTerminalToFile,
+  ClaudeAvailable,
   NewFlowID, SaveFlow,
   GenerateFlowDescriptions,
   OpenURL,
   StopTerminal,
 } from '../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
-import { FolderOpen, X, TerminalSquare, ChevronDown, RotateCcw } from 'lucide-react'
+import { FolderOpen, X, TerminalSquare, ChevronDown, ChevronUp, RotateCcw, Download, Settings as SettingsIcon } from 'lucide-react'
+import { Settings } from './components/Settings'
 import logo from './assets/images/skilltree_logo.png'
 
 function App() {
@@ -30,11 +32,19 @@ function App() {
     updateFlowDescription,
     boardDirty,
     onSaveBoard, onDiscardBoard,
+    claudeAvailable, setClaudeAvailable,
   } = useStore()
 
   const [pendingView, setPendingView] = useState<'skills' | 'trees' | 'board' | null>(null)
   const [terminalKey, setTerminalKey] = useState(0)
   const [confirmReset, setConfirmReset] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
+  const terminalRef = useRef<TerminalHandle>(null)
+
+  async function handleSaveTerminal() {
+    const content = terminalRef.current?.getContent() ?? ''
+    await SaveTerminalToFile(content)
+  }
 
   async function handleResetTerminal() {
     setTerminalAlive(false)
@@ -73,11 +83,14 @@ function App() {
 
   useEffect(() => {
     GetProjectDir().then((d) => { if (d) setProjectDir(d) })
+    ClaudeAvailable().then(setClaudeAvailable)
     loadAll()
 
     // MCP events — Claude controlling the GUI
     EventsOn('mcp:navigate', (view: string) => setView(view as any))
     EventsOn('mcp:refresh', () => loadAll())
+    EventsOn('run:done',    () => { setTimeout(() => terminalRef.current?.scrollToCursor(), 300) })
+    EventsOn('run:stopped', () => { setTimeout(() => terminalRef.current?.scrollToCursor(), 300) })
     EventsOn('mcp:open_flow', (id: string) => {
       setSelectedFlowId(id)
       setView('board')
@@ -90,6 +103,8 @@ function App() {
     return () => {
       EventsOff('mcp:navigate')
       EventsOff('mcp:refresh')
+      EventsOff('run:done')
+      EventsOff('run:stopped')
       EventsOff('mcp:open_flow')
       EventsOff('flow:description_updated')
     }
@@ -147,7 +162,7 @@ function App() {
   const projectBasename = projectDir ? projectDir.split('/').filter(Boolean).pop() : null
 
   return (
-    <div className="app">
+    <div className="app" onContextMenu={(e) => e.preventDefault()}>
       <header className="titlebar">
         <div className="titlebar-logo">
           <img src={logo} alt="Skilltree" className="titlebar-logo-img" />
@@ -187,8 +202,24 @@ function App() {
           >
             <TerminalSquare size={14} />
           </button>
+          <button
+            className="btn-ghost"
+            onClick={() => setShowSettings(true)}
+            title="Settings"
+          >
+            <SettingsIcon size={14} />
+          </button>
         </div>
       </header>
+
+      {!claudeAvailable && (
+        <div className="claude-missing-bar">
+          <span>
+            <strong>Claude Code not found.</strong> Install it to use the terminal, run flows, and generate descriptions:
+            <code> npm i -g @anthropic-ai/claude-code</code>
+          </span>
+        </div>
+      )}
 
       {error && (
         <div className="error-bar">
@@ -211,17 +242,29 @@ function App() {
         </main>
 
         {terminalOpen && (
-          <>
-            <div
-              className="terminal-resize-handle"
-              onMouseDown={onResizeDragStart}
-            />
-            <div className="terminal-panel" style={{ height: terminalHeight }}>
-              <div className="terminal-header">
-                <TerminalSquare size={13} />
-                <span>Claude</span>
-                {terminalAlive && <span className="terminal-alive-dot" />}
-                <div className="terminal-header-gap" />
+          <div
+            className="terminal-resize-handle"
+            onMouseDown={onResizeDragStart}
+          />
+        )}
+        <div
+          className={`terminal-panel ${terminalOpen ? '' : 'terminal-panel-collapsed'}`}
+          style={terminalOpen ? { height: terminalHeight } : undefined}
+        >
+          <div className="terminal-header">
+            <TerminalSquare size={13} />
+            <span>Claude</span>
+            {terminalAlive && <span className="terminal-alive-dot" />}
+            <div className="terminal-header-gap" />
+            {terminalOpen && (
+              <>
+                <button
+                  className="btn-ghost terminal-save"
+                  onClick={handleSaveTerminal}
+                  title="Save session to file"
+                >
+                  <Download size={15} />
+                </button>
                 <button
                   className="btn-ghost terminal-reset"
                   onClick={() => setConfirmReset(true)}
@@ -229,20 +272,23 @@ function App() {
                 >
                   <RotateCcw size={15} />
                 </button>
-                <button
-                  className="btn-ghost terminal-close"
-                  onClick={() => setTerminalOpen(false)}
-                >
-                  <ChevronDown size={15} />
-                </button>
-              </div>
-              <div className="terminal-body">
-                <Terminal key={terminalKey} onExit={() => setTerminalAlive(false)} />
-              </div>
-            </div>
-          </>
-        )}
+              </>
+            )}
+            <button
+              className="btn-ghost terminal-close"
+              onClick={() => setTerminalOpen(!terminalOpen)}
+              title={terminalOpen ? 'Collapse terminal' : 'Expand terminal'}
+            >
+              {terminalOpen ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
+            </button>
+          </div>
+          <div style={{ display: terminalOpen ? undefined : 'none' }} className="terminal-body">
+            <Terminal key={terminalKey} ref={terminalRef} onExit={() => setTerminalAlive(false)} />
+          </div>
+        </div>
       </div>
+
+      {showSettings && <Settings onClose={() => setShowSettings(false)} />}
 
       {/* Terminal reset confirmation */}
       {confirmReset && (

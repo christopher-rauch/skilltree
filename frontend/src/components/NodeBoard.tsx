@@ -543,6 +543,7 @@ export function NodeBoard({ onRefresh }: Props) {
         if (e.key === 'z' &&  e.shiftKey) { e.preventDefault(); redoRef.current(); return }
         if (e.key === 's') { e.preventDefault(); handleSaveRef.current(); return }
         if (e.key === 'c') {
+          e.preventDefault()
           const selected = nodesRef.current.filter((n) => n.selected)
           if (selected.length === 0) return
           const selectedIds = new Set(selected.map((n) => n.id))

@@ -91,6 +91,19 @@
   line-height: 1.4;
 }
 
+.flow-card-description-loading {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 .flow-card-stats {
   display: flex;
   align-items: center;

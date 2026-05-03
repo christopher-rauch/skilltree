@@ -660,6 +660,33 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 			label, _ := node.Data["label"].(string)
 
 			switch node.Type {
+			case "block-condition":
+				condition, _ := node.Data["condition"].(string)
+				condition = applyExportVars(condition, exportVars)
+				if label == "" {
+					label = "Condition"
+				}
+				fmt.Fprintf(&sb, "### %s *(condition)*\n\n", label)
+				fmt.Fprintf(&sb, "Evaluate: **\"%s\"**\n\n", condition)
+				sb.WriteString("- If **yes**: continue along the Yes path\n")
+				sb.WriteString("- If **no**: continue along the No path\n\n")
+
+			case "block-loop":
+				loopPrompt, _ := node.Data["prompt"].(string)
+				loopPrompt = applyExportVars(loopPrompt, exportVars)
+				countRaw, _ := node.Data["count"].(float64)
+				count := int(countRaw)
+				if count < 1 {
+					count = 1
+				}
+				if label == "" {
+					label = "Loop"
+				}
+				fmt.Fprintf(&sb, "### %s *(loop × %d)*\n\n", label, count)
+				fmt.Fprintf(&sb, "Repeat the following %d time(s), substituting `{{iteration}}` with the current count:\n\n", count)
+				sb.WriteString(strings.TrimSpace(loopPrompt))
+				sb.WriteString("\n\n")
+
 			case "block-mcp":
 				serverName, _ := node.Data["serverName"].(string)
 				toolName, _ := node.Data["toolName"].(string)

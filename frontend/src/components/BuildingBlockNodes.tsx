@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useContext } from 'react'
 import { Handle, Position, NodeResizeControl, ResizeControlVariant, useReactFlow } from '@xyflow/react'
-import { Type, Terminal, BookOpen, FolderOpen, Paperclip, Globe, Braces, Plus, X, Wifi, ShieldAlert } from 'lucide-react'
+import { Type, Terminal, BookOpen, FolderOpen, Paperclip, Globe, Braces, Plus, X, Wifi, ShieldAlert, GitBranch, Repeat } from 'lucide-react'
 import { BadgeContext, RunContext, IsRunningContext, SetDirtyContext } from './NodeBoard'
 import { SaveBlockAsLibrarySkill, SelectScriptFile, SelectAnyFile, GetMCPServers } from '../../wailsjs/go/main/App'
 import './BuildingBlockNodes.css'
@@ -844,6 +844,119 @@ export function MCPToolNode({ id, data, selected }: { id: string; data: MCPToolD
             onChange={(e) => update({ responseVar: e.target.value })} onMouseDown={(e) => e.stopPropagation()} />
           <span className="block-http-resp-brace">{'}}'}</span>
         </div>
+      </div>
+    </>
+  )
+}
+
+// ── Condition Node ────────────────────────────────────────────────────────────
+
+interface ConditionData {
+  label?: string
+  condition?: string
+  [key: string]: unknown
+}
+
+export function ConditionNode({ id, data, selected }: { id: string; data: ConditionData; selected: boolean }) {
+  const { updateNodeData } = useReactFlow()
+  const isRunning = useContext(IsRunningContext)
+  const runStatus = useContext(RunContext).get(id)
+  const markDirty = useContext(SetDirtyContext)
+
+  const handleBase = { width: 10, height: 10, borderRadius: '50%', background: 'var(--surface-3)', border: '2px solid var(--border-2)' }
+  const yesStyle = { ...handleBase, border: '2px solid #22c55e' }
+  const noStyle  = { ...handleBase, border: '2px solid #ef4444' }
+
+  return (
+    <>
+      <BlockBadge id={id} />
+      <Handle type="target" position={Position.Top} style={handleBase} />
+      {/* Yes = right, No = bottom */}
+      <Handle id="source-yes" type="source" position={Position.Right}  style={yesStyle} />
+      <Handle id="source-no"  type="source" position={Position.Bottom} style={noStyle}  />
+      <BlockResizeControls selected={selected} />
+
+      <div className={`block-node block-condition ${selected ? 'selected' : ''} ${runStatus ?? ''}`}>
+        <div className="block-header">
+          <GitBranch size={12} className="block-icon" />
+          <input
+            className="block-label-input nodrag nopan nowheel"
+            value={data.label ?? 'Condition'}
+            disabled={isRunning}
+            onChange={(e) => { updateNodeData(id, { ...data, label: e.target.value }); markDirty() }}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        </div>
+        <textarea
+          className="block-textarea nodrag nopan nowheel"
+          placeholder="Condition for Claude to evaluate — e.g. 'Does the output contain errors?'"
+          value={data.condition ?? ''}
+          disabled={isRunning}
+          onChange={(e) => { updateNodeData(id, { ...data, condition: e.target.value }); markDirty() }}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
+        <div className="block-condition-legend nodrag nopan">
+          <span className="block-condition-yes">→ Yes (right)</span>
+          <span className="block-condition-no">→ No (bottom)</span>
+        </div>
+      </div>
+    </>
+  )
+}
+
+// ── Loop Node ─────────────────────────────────────────────────────────────────
+
+interface LoopData {
+  label?: string
+  count?: number
+  prompt?: string
+  [key: string]: unknown
+}
+
+export function LoopNode({ id, data, selected }: { id: string; data: LoopData; selected: boolean }) {
+  const { updateNodeData } = useReactFlow()
+  const isRunning = useContext(IsRunningContext)
+  const runStatus = useContext(RunContext).get(id)
+  const markDirty = useContext(SetDirtyContext)
+
+  return (
+    <>
+      <BlockBadge id={id} />
+      <Handle type="target" position={Position.Top} style={HANDLE_STYLE} />
+      <Handle type="source" position={Position.Bottom} style={HANDLE_STYLE} />
+      <BlockResizeControls selected={selected} />
+
+      <div className={`block-node block-loop ${selected ? 'selected' : ''} ${runStatus ?? ''}`}>
+        <div className="block-header">
+          <Repeat size={12} className="block-icon" />
+          <input
+            className="block-label-input nodrag nopan nowheel"
+            value={data.label ?? 'Loop'}
+            disabled={isRunning}
+            onChange={(e) => { updateNodeData(id, { ...data, label: e.target.value }); markDirty() }}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+          <div className="block-loop-count nodrag nopan nowheel">
+            <span className="block-loop-x">×</span>
+            <input
+              type="number"
+              className="block-loop-input"
+              min={1}
+              value={data.count ?? 3}
+              disabled={isRunning}
+              onChange={(e) => { updateNodeData(id, { ...data, count: Math.max(1, parseInt(e.target.value) || 1) }); markDirty() }}
+              onMouseDown={(e) => e.stopPropagation()}
+            />
+          </div>
+        </div>
+        <textarea
+          className="block-textarea nodrag nopan nowheel"
+          placeholder="Prompt to run each iteration. Use {{iteration}} for current count, {{total_iterations}} for total."
+          value={data.prompt ?? ''}
+          disabled={isRunning}
+          onChange={(e) => { updateNodeData(id, { ...data, prompt: e.target.value }); markDirty() }}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
       </div>
     </>
   )

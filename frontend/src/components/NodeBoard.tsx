@@ -26,7 +26,7 @@ import { useStore } from '../store'
 import { Flow, FlowNode, FlowEdge } from '../types'
 import { SkillNode } from './SkillNode'
 import { AnnotationTextNode, AnnotationStickyNode, AnnotationDrawingNode } from './AnnotationNodes'
-import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode, OutputCaptureNode, HttpRequestNode, ApprovalGateNode, MCPToolNode } from './BuildingBlockNodes'
+import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode, OutputCaptureNode, HttpRequestNode, ApprovalGateNode, MCPToolNode, ConditionNode, LoopNode } from './BuildingBlockNodes'
 import {
   SaveFlow,
   DeleteFlow,
@@ -40,7 +40,7 @@ import {
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   Plus, Save, Trash2, Download, ChevronDown, Check, X, Copy, AlertTriangle,
-  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip, Globe, Braces, HardDriveDownload, Wifi, ShieldAlert,
+  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip, Globe, Braces, HardDriveDownload, Wifi, ShieldAlert, GitBranch, Repeat,
 } from 'lucide-react'
 import { ProjectScopeInfo } from './ProjectScopeInfo'
 import { GithubButton } from './GithubButton'
@@ -60,6 +60,8 @@ const nodeTypes = {
   'block-http':      HttpRequestNode,
   'block-gate':      ApprovalGateNode,
   'block-mcp':       MCPToolNode,
+  'block-condition': ConditionNode,
+  'block-loop':      LoopNode,
 }
 
 export const BadgeContext = createContext<Map<string, string>>(new Map())
@@ -580,7 +582,9 @@ export function NodeBoard({ onRefresh }: Props) {
           output:   { label: 'Output Capture',   height: 110, data: { destination: 'file', filePath: '' } },
           http:     { label: 'HTTP Request',     height: 160, data: { method: 'GET', url: '', headers: [], body: '', responseVar: 'http_response', showHeaders: false } },
           gate:     { label: 'Approval Gate',   height: 130, data: { message: '' } },
-          mcp:      { label: 'MCP Tool',        height: 180, data: { serverName: '', toolName: '', args: [], responseVar: 'mcp_response' } },
+          mcp:       { label: 'MCP Tool',   height: 180, data: { serverName: '', toolName: '', args: [], responseVar: 'mcp_response' } },
+          condition: { label: 'Condition',  height: 140, data: { condition: '' } },
+          loop:      { label: 'Loop',       height: 160, data: { count: 3, prompt: '' } },
         }
         const def = defaults[blockType] ?? defaults.text
         setNodes((nds) => [...nds, {
@@ -872,7 +876,9 @@ export function NodeBoard({ onRefresh }: Props) {
               { blockType: 'output',   icon: <HardDriveDownload size={13} />, label: 'Output Capture' },
               { blockType: 'http',     icon: <Wifi size={13} />,             label: 'HTTP Request'    },
               { blockType: 'gate',     icon: <ShieldAlert size={13} />,      label: 'Approval Gate'  },
-              { blockType: 'mcp',      icon: <Braces size={13} />,           label: 'MCP Tool'       },
+              { blockType: 'mcp',       icon: <Braces size={13} />,     label: 'MCP Tool'       },
+              { blockType: 'condition', icon: <GitBranch size={13} />, label: 'Condition'      },
+              { blockType: 'loop',      icon: <Repeat size={13} />,    label: 'Loop'           },
             ] as const).map(({ blockType, icon, label }) => (
               <div
                 key={blockType}

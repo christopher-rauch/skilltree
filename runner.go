@@ -160,13 +160,15 @@ func extractVars(node FlowNode) map[string]string {
 	return out
 }
 
+// activateFunc marks a node's outgoing edges as live.
+// handle="" activates all outgoing edges; a named handle activates only matching edges.
+type activateFunc func(nodeID, handle string)
+
 func (a *App) executeFlow(ctx context.Context, flow Flow) error {
 	claudePath, err := shellWhich("claude")
 	if err != nil {
 		return fmt.Errorf("claude CLI not found — install it with: npm i -g @anthropic-ai/claude-code")
 	}
-
-	// Use the terminal's session directory so Claude runs in a trusted, pre-configured context.
 	dir := a.term.dir
 	if dir == "" {
 		return fmt.Errorf("open the terminal first — the runner needs its session directory")
@@ -177,9 +179,49 @@ func (a *App) executeFlow(ctx context.Context, flow Flow) error {
 		return fmt.Errorf("no connected nodes to run")
 	}
 
+	// Build edge lookup tables.
+	outEdgesMap := map[string][]FlowEdge{} // nodeID → outgoing edges
+	inEdgeMap := map[string]string{}        // nodeID → incoming edgeID (single, due to constraint)
+	for _, e := range flow.Edges {
+		outEdgesMap[e.Source] = append(outEdgesMap[e.Source], e)
+		inEdgeMap[e.Target] = e.ID
+	}
+
+	// activeEdges tracks which edges are live. Edges from root nodes start active.
+	activeEdges := map[string]bool{}
+	var edgeMu sync.Mutex
+	for _, node := range flow.Nodes {
+		if _, hasIn := inEdgeMap[node.ID]; !hasIn {
+			for _, e := range outEdgesMap[node.ID] {
+				activeEdges[e.ID] = true
+			}
+		}
+	}
+
+	// activate is called after a node completes to mark its outgoing edges live.
+	activate := func(nodeID, handle string) {
+		edgeMu.Lock()
+		defer edgeMu.Unlock()
+		for _, e := range outEdgesMap[nodeID] {
+			if handle == "" || e.SourceHandle == handle || e.SourceHandle == "" {
+				activeEdges[e.ID] = true
+			}
+		}
+	}
+
+	// canRun returns true when a node's incoming edge (if any) is active.
+	canRun := func(nodeID string) bool {
+		inID, hasIn := inEdgeMap[nodeID]
+		if !hasIn {
+			return true
+		}
+		edgeMu.Lock()
+		defer edgeMu.Unlock()
+		return activeEdges[inID]
+	}
+
 	a.emitTerminal(fmt.Sprintf("\r\n\x1b[1;37m━━━━━ Running: %s ━━━━━\x1b[0m\r\n", flow.Name))
 
-	// vars accumulates Variable node values across phases.
 	vars := map[string]string{}
 	var varsMu sync.Mutex
 
@@ -188,19 +230,30 @@ func (a *App) executeFlow(ctx context.Context, flow Flow) error {
 			return ctx.Err()
 		}
 
+		// Filter to only nodes whose incoming edge is active.
+		var execNodes []FlowNode
+		for _, n := range phase {
+			if canRun(n.ID) {
+				execNodes = append(execNodes, n)
+			}
+		}
+		if len(execNodes) == 0 {
+			continue
+		}
+
 		phaseNum := i + 1
-		if len(phase) > 1 {
+		if len(execNodes) > 1 {
 			a.emitTerminal(fmt.Sprintf("\r\n\x1b[1;36m── Phase %d (concurrent) ──\x1b[0m\r\n", phaseNum))
 		} else {
 			a.emitTerminal(fmt.Sprintf("\r\n\x1b[1;36m── Phase %d ──\x1b[0m\r\n", phaseNum))
 		}
 
 		var wg sync.WaitGroup
-		for _, node := range phase {
+		for _, node := range execNodes {
 			wg.Add(1)
 			go func(n FlowNode) {
 				defer wg.Done()
-				a.runNode(ctx, n, claudePath, dir, vars, &varsMu)
+				a.runNode(ctx, n, claudePath, dir, vars, &varsMu, activate)
 			}(node)
 		}
 		wg.Wait()
@@ -214,11 +267,16 @@ func (a *App) executeFlow(ctx context.Context, flow Flow) error {
 	return nil
 }
 
-func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string, vars map[string]string, varsMu *sync.Mutex) {
+func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string, vars map[string]string, varsMu *sync.Mutex, activate activateFunc) {
 	label, _ := node.Data["label"].(string)
 	if label == "" {
 		label = node.Type
 	}
+
+	// activeHandle controls which outgoing edges are activated when this node finishes.
+	// "" = all edges (normal); "source-yes"/"source-no" = condition branching.
+	activeHandle := ""
+	defer func() { activate(node.ID, activeHandle) }()
 
 	// Helper: substitute variables then release lock quickly.
 	sub := func(s string) string {
@@ -522,6 +580,75 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 			return
 		}
 		runErr = a.runShellScript(ctx, dir, scriptPath)
+
+	case "block-condition":
+		condition, _ := node.Data["condition"].(string)
+		condition = sub(condition)
+		if strings.TrimSpace(condition) == "" {
+			a.emitTerminal("\x1b[33m⚠ Condition is empty — taking 'no' path\x1b[0m\r\n")
+			activeHandle = "source-no"
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		}
+		evalPrompt := "Evaluate the following condition and respond with ONLY the single word \"yes\" or \"no\", nothing else.\n\nCondition: " + condition
+		a.emitTerminal("\x1b[2m  evaluating condition…\x1b[0m\r\n")
+		if err := a.runClaudePrompt(ctx, claudePath, dir, evalPrompt); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			a.emitTerminal(fmt.Sprintf("\r\n\x1b[1;31m✗ Condition evaluation failed: %s\x1b[0m\r\n", err.Error()))
+			runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+			return
+		}
+		// Read the last captured output to determine yes/no.
+		a.runCapMu.Lock()
+		var captured string
+		if a.runCap != nil {
+			captured = a.runCap.String()
+		}
+		a.runCapMu.Unlock()
+		answer := strings.ToLower(strings.TrimSpace(captured))
+		if strings.HasPrefix(answer, "y") {
+			activeHandle = "source-yes"
+			a.emitTerminal("\x1b[1;32m→ yes\x1b[0m\r\n")
+		} else {
+			activeHandle = "source-no"
+			a.emitTerminal("\x1b[1;31m→ no\x1b[0m\r\n")
+		}
+		runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+		return
+
+	case "block-loop":
+		loopPrompt, _ := node.Data["prompt"].(string)
+		loopPrompt = sub(loopPrompt)
+		countRaw, _ := node.Data["count"].(float64)
+		count := int(countRaw)
+		if count < 1 {
+			count = 1
+		}
+		if strings.TrimSpace(loopPrompt) == "" {
+			a.emitTerminal("\x1b[33m⚠ Loop prompt is empty — skipping\x1b[0m\r\n")
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		}
+		for i := 1; i <= count; i++ {
+			if ctx.Err() != nil {
+				return
+			}
+			iterPrompt := strings.ReplaceAll(loopPrompt, "{{iteration}}", fmt.Sprintf("%d", i))
+			iterPrompt = strings.ReplaceAll(iterPrompt, "{{total_iterations}}", fmt.Sprintf("%d", count))
+			a.emitTerminal(fmt.Sprintf("\x1b[2m  iteration %d/%d\x1b[0m\r\n", i, count))
+			if err := a.runClaudePrompt(ctx, claudePath, dir, iterPrompt); err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				a.emitTerminal(fmt.Sprintf("\r\n\x1b[1;31m✗ Loop iteration %d failed: %s\x1b[0m\r\n", i, err.Error()))
+				runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+				return
+			}
+		}
+		runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+		return
 
 	default: // skill node
 		skillName, _ := node.Data["skillName"].(string)

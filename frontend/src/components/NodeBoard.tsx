@@ -23,7 +23,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useStore } from '../store'
-import { Flow, FlowNode, FlowEdge } from '../types'
+import { Flow, FlowNode, FlowEdge, Skill } from '../types'
 import { SkillNode } from './SkillNode'
 import { AnnotationTextNode, AnnotationStickyNode, AnnotationDrawingNode } from './AnnotationNodes'
 import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode, OutputCaptureNode, HttpRequestNode, ApprovalGateNode, MCPToolNode, ConditionNode, LoopNode } from './BuildingBlockNodes'
@@ -40,7 +40,7 @@ import {
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   Plus, Save, Trash2, Download, ChevronDown, Check, X, Copy, AlertTriangle,
-  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip, Globe, Braces, HardDriveDownload, Wifi, ShieldAlert, GitBranch, Repeat,
+  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip, Globe, Braces, HardDriveDownload, Wifi, ShieldAlert, GitBranch, Repeat, Undo2, Redo2, Eye,
 } from 'lucide-react'
 import { ProjectScopeInfo } from './ProjectScopeInfo'
 import { GithubButton } from './GithubButton'
@@ -169,12 +169,30 @@ function computeNodeBadges(nodes: Node[], edges: Edge[]): Map<string, string> {
       byLevel.get(lv)!.push(id)
     }
 
+    // Build a parent lookup (incoming edge source) and identify condition nodes.
+    const inEdgeSource = new Map<string, string>()
+    for (const e of edges) inEdgeSource.set(e.target, e.source)
+    const conditionIds = new Set(nodes.filter((n) => n.type === 'block-condition').map((n) => n.id))
+
     Array.from(byLevel.keys()).sort((a, b) => a - b).forEach((lv, i) => {
       const ids = byLevel.get(lv)!.sort((a, b) => (dfsOrder.get(a) ?? 0) - (dfsOrder.get(b) ?? 0))
       const num = i + 1
-      ids.forEach((id, j) => {
-        result.set(id, ids.length === 1 ? String(num) : `${num}${String.fromCharCode(97 + j)}`)
-      })
+
+      // Group by parent. Condition-node children are exclusive branches — no letters.
+      // Multiple children of the same non-condition parent are concurrent — letters.
+      const byParent = new Map<string, string[]>()
+      for (const id of ids) {
+        const parent = inEdgeSource.get(id) ?? '__root__'
+        if (!byParent.has(parent)) byParent.set(parent, [])
+        byParent.get(parent)!.push(id)
+      }
+
+      for (const [parentId, groupIds] of byParent) {
+        const isConcurrent = !conditionIds.has(parentId) && groupIds.length > 1
+        groupIds.forEach((id, j) => {
+          result.set(id, isConcurrent ? `${num}${String.fromCharCode(97 + j)}` : String(num))
+        })
+      }
     })
   }
 
@@ -207,6 +225,8 @@ export function NodeBoard({ onRefresh }: Props) {
     setBoardDirty: setStoreBoardDirty,
     setOnSaveBoard, setOnDiscardBoard,
     terminalOpen, setTerminalOpen,
+    setView, setPreviewSkill,
+    claudeAvailable,
   } = useStore()
 
   // Derive active flow
@@ -234,7 +254,7 @@ export function NodeBoard({ onRefresh }: Props) {
     EventsOn('run:node-error',  (nodeId: string) =>
       setRunState((prev) => new Map(prev).set(nodeId, 'error')))
     EventsOn('run:done',    () => setIsRunning(false))
-    EventsOn('run:stopped', () => setIsRunning(false))
+    EventsOn('run:stopped', () => { setIsRunning(false); setRunState(new Map()) })
     EventsOn('run:gate-request', (data: { nodeId: string; message: string }) => setGateRequest(data))
     return () => {
       EventsOff('run:node-active', 'run:node-done', 'run:node-error', 'run:done', 'run:stopped', 'run:gate-request')
@@ -245,7 +265,60 @@ export function NodeBoard({ onRefresh }: Props) {
   useEffect(() => {
     setRunState(new Map())
     setIsRunning(false)
+    historyRef.current = { past: [], future: [] }
+    setCanUndo(false)
+    setCanRedo(false)
   }, [selectedFlowId])
+
+  // Undo / redo
+  type Snapshot = { nodes: Node[]; edges: Edge[] }
+  const historyRef = useRef<{ past: Snapshot[]; future: Snapshot[] }>({ past: [], future: [] })
+  const [canUndo, setCanUndo] = useState(false)
+  const [canRedo, setCanRedo] = useState(false)
+
+  // Always-fresh refs so event handlers with [] deps can read current state.
+  const nodesRef = useRef<Node[]>([])
+  const edgesRef = useRef<Edge[]>([])
+  nodesRef.current = nodes
+  edgesRef.current = edges
+
+  function pushHistory() {
+    historyRef.current.past.push({ nodes: nodesRef.current, edges: edgesRef.current })
+    historyRef.current.future = []
+    setCanUndo(true)
+    setCanRedo(false)
+  }
+
+  function undo() {
+    const { past, future } = historyRef.current
+    if (!past.length) return
+    const prev = past[past.length - 1]
+    historyRef.current.past = past.slice(0, -1)
+    historyRef.current.future = [{ nodes: nodesRef.current, edges: edgesRef.current }, ...future]
+    setNodes(prev.nodes)
+    setEdges(prev.edges)
+    setCanUndo(historyRef.current.past.length > 0)
+    setCanRedo(true)
+    setDirty(true)
+  }
+
+  function redo() {
+    const { past, future } = historyRef.current
+    if (!future.length) return
+    const next = future[0]
+    historyRef.current.future = future.slice(1)
+    historyRef.current.past = [...past, { nodes: nodesRef.current, edges: edgesRef.current }]
+    setNodes(next.nodes)
+    setEdges(next.edges)
+    setCanUndo(true)
+    setCanRedo(historyRef.current.future.length > 0)
+    setDirty(true)
+  }
+
+  // Keep stable refs to undo/redo for the keyboard handler.
+  const undoRef = useRef(undo)
+  const redoRef = useRef(redo)
+  useEffect(() => { undoRef.current = undo; redoRef.current = redo })
 
   // Annotation tools
   const [annotationTool, setAnnotationToolState] = useState<'text' | 'sticky' | 'pencil' | null>(null)
@@ -344,6 +417,7 @@ export function NodeBoard({ onRefresh }: Props) {
             },
           ])
           setDirty(true)
+          setAnnotationTool(null)
         }
         pencilRef.current = null
         setPencilOverlay(null)
@@ -376,7 +450,22 @@ export function NodeBoard({ onRefresh }: Props) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [edgeMenu, setEdgeMenu] = useState<{ edgeId: string; x: number; y: number } | null>(null)
   const [nodeMenu, setNodeMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null)
+  const [paletteMenu, setPaletteMenu] = useState<{ skill: Skill; x: number; y: number } | null>(null)
+  const [skillSearch, setSkillSearch] = useState('')
   const [pendingFlowId, setPendingFlowId] = useState<string | null>(null)
+  const [pendingClose, setPendingClose] = useState(false)
+  const [pendingSkillPreview, setPendingSkillPreview] = useState<Skill | null>(null)
+
+  function handleCloseFlow() {
+    if (dirty) { setPendingClose(true); return }
+    setSelectedFlowId(null)
+  }
+
+  function handlePreviewSkill(skill: Skill) {
+    if (dirty) { setPendingSkillPreview(skill); return }
+    setPreviewSkill({ name: skill.name, scope: skill.scope })
+    setView('skills')
+  }
 
   const reactFlowWrapper = useRef<HTMLDivElement>(null)
   const rfInstance = useRef<ReactFlowInstance | null>(null)
@@ -438,19 +527,31 @@ export function NodeBoard({ onRefresh }: Props) {
     return parts.join(' · ')
   }, [nodes, edges])
 
-  // Delete selected nodes (+ their edges) on Backspace, unless focus is in a text field
+  // Keyboard: delete selected nodes + undo/redo
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (isRunningRef.current) return
-      if (e.key !== 'Backspace' && e.key !== 'Delete') return
       const t = e.target as HTMLElement
-      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
+      const inText = t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
 
-      e.preventDefault() // stop WebKit playing the system alert sound
+      // Undo / redo / save (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, Cmd/Ctrl+S)
+      if ((e.metaKey || e.ctrlKey) && !inText) {
+        if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undoRef.current(); return }
+        if (e.key === 'z' &&  e.shiftKey) { e.preventDefault(); redoRef.current(); return }
+        if (e.key === 's') { e.preventDefault(); handleSaveRef.current(); return }
+      }
+
+      if (e.key !== 'Backspace' && e.key !== 'Delete') return
+      if (inText) return
+      e.preventDefault()
 
       setNodes((nds) => {
         const selectedIds = new Set(nds.filter((n) => n.selected).map((n) => n.id))
         if (selectedIds.size === 0) return nds
+        historyRef.current.past.push({ nodes: nds, edges: edgesRef.current })
+        historyRef.current.future = []
+        setCanUndo(true)
+        setCanRedo(false)
         setEdges((eds) => eds.filter((e) => !selectedIds.has(e.source) && !selectedIds.has(e.target)))
         setDirty(true)
         return nds.filter((n) => !n.selected)
@@ -523,6 +624,7 @@ export function NodeBoard({ onRefresh }: Props) {
     (params: Connection) => {
       if (isRunningRef.current) return
       if (params.source === params.target) return
+      pushHistory()
 
       // Reject if adding this edge would create a cycle:
       // check whether params.source is already reachable from params.target
@@ -574,7 +676,7 @@ export function NodeBoard({ onRefresh }: Props) {
         nodeIdCounter.current += 1
         const id = `node-${Date.now()}-${nodeIdCounter.current}`
         const defaults: Record<string, { label: string; height: number; data: Record<string, unknown> }> = {
-          text:    { label: 'Text Block',  height: 180, data: { content: '' } },
+          text:    { label: 'Prompt',  height: 180, data: { content: '' } },
           command: { label: 'Run Command', height: 90,  data: { scriptPath: '' } },
           file:    { label: 'File Input',      height: 140, data: { filePath: '', instruction: '' } },
           context:  { label: 'Context Injector', height: 180, data: { content: '' } },
@@ -587,6 +689,7 @@ export function NodeBoard({ onRefresh }: Props) {
           loop:      { label: 'Loop',       height: 160, data: { count: 3, prompt: '' } },
         }
         const def = defaults[blockType] ?? defaults.text
+        pushHistory()
         setNodes((nds) => [...nds, {
           id,
           type: `block-${blockType}`,
@@ -628,6 +731,7 @@ export function NodeBoard({ onRefresh }: Props) {
         },
       }
 
+      pushHistory()
       setNodes((nds) => [...nds, newNode])
       setDirty(true)
     },
@@ -645,6 +749,7 @@ export function NodeBoard({ onRefresh }: Props) {
   }, [])
 
   function removeNode(nodeId: string) {
+    pushHistory()
     setNodes((nds) => nds.filter((n) => n.id !== nodeId))
     setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId))
     setDirty(true)
@@ -654,6 +759,7 @@ export function NodeBoard({ onRefresh }: Props) {
   function duplicateNode(nodeId: string) {
     const node = nodes.find((n) => n.id === nodeId)
     if (!node) return
+    pushHistory()
     nodeIdCounter.current += 1
     const newId = `node-${Date.now()}-${nodeIdCounter.current}`
     setNodes((nds) => [
@@ -670,12 +776,14 @@ export function NodeBoard({ onRefresh }: Props) {
   }
 
   function deleteEdge(edgeId: string) {
+    pushHistory()
     setEdges((eds) => eds.filter((e) => e.id !== edgeId))
     setDirty(true)
     setEdgeMenu(null)
   }
 
   function reverseEdge(edgeId: string) {
+    pushHistory()
     setEdges((eds) => {
       const edge = eds.find((e) => e.id === edgeId)
       if (!edge) return eds
@@ -839,92 +947,8 @@ export function NodeBoard({ onRefresh }: Props) {
 
   return (
     <div className="node-board">
-      {/* Left palette */}
-      <aside className="skill-palette">
-        <div className="palette-header">
-          <span>Skills</span>
-          <span className="palette-hint">drag onto canvas</span>
-        </div>
-        <div className="palette-list">
-          {skills.length === 0 && (
-            <div className="palette-empty">No skills loaded</div>
-          )}
-          {skills.map((skill) => (
-            <div
-              key={`${skill.scope}-${skill.name}`}
-              className={`palette-item ${isRunning ? 'disabled' : ''}`}
-              draggable={!isRunning}
-              onDragStart={(e) => {
-                e.dataTransfer.setData('application/skilltree', JSON.stringify(skill))
-                e.dataTransfer.effectAllowed = 'copy'
-              }}
-            >
-              <span className="palette-item-name">{skill.name}</span>
-              <span className={`palette-badge ${skill.scope}`}>{skill.scope === 'global' ? 'G' : skill.scope === 'library' ? 'L' : 'P'}</span>
-            </div>
-          ))}
-        </div>
-        <div className="palette-tools-section">
-          <div className="palette-tools-header">Building Blocks</div>
-          <div className="palette-tools-list">
-            {([
-              { blockType: 'text',    icon: <Type size={13} />,      label: 'Text Block'      },
-              { blockType: 'command', icon: <Terminal size={13} />,  label: 'Run Command'     },
-              { blockType: 'file',    icon: <Paperclip size={13} />, label: 'File Input'      },
-              { blockType: 'context',  icon: <Globe size={13} />,   label: 'Context Injector' },
-              { blockType: 'variable', icon: <Braces size={13} />,          label: 'Variable'        },
-              { blockType: 'output',   icon: <HardDriveDownload size={13} />, label: 'Output Capture' },
-              { blockType: 'http',     icon: <Wifi size={13} />,             label: 'HTTP Request'    },
-              { blockType: 'gate',     icon: <ShieldAlert size={13} />,      label: 'Approval Gate'  },
-              { blockType: 'mcp',       icon: <Braces size={13} />,     label: 'MCP Tool'       },
-              { blockType: 'condition', icon: <GitBranch size={13} />, label: 'Condition'      },
-              { blockType: 'loop',      icon: <Repeat size={13} />,    label: 'Loop'           },
-            ] as const).map(({ blockType, icon, label }) => (
-              <div
-                key={blockType}
-                className={`palette-item ${isRunning ? 'disabled' : ''}`}
-                draggable={!isRunning}
-                onDragStart={(e) => {
-                  e.dataTransfer.setData('application/skilltree-block', JSON.stringify({ blockType }))
-                  e.dataTransfer.effectAllowed = 'copy'
-                }}
-              >
-                <span className="palette-item-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {icon}{label}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="palette-tools-section">
-          <div className="palette-tools-header">Canvas Tools</div>
-          <div className="palette-tools-list">
-            {([
-              { tool: 'text',   icon: <Type size={13} />,       label: 'Text'   },
-              { tool: 'sticky', icon: <StickyNote size={13} />, label: 'Sticky' },
-              { tool: 'pencil', icon: <Pen size={13} />,        label: 'Pencil' },
-            ] as const).map(({ tool, icon, label }) => (
-              <button
-                key={tool}
-                className={`palette-tool-btn ${annotationTool === tool ? 'active' : ''}`}
-                onClick={() => !isRunning && setAnnotationTool(annotationTool === tool ? null : tool)}
-                disabled={isRunning}
-                title={label}
-              >
-                {icon}
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-        <GithubButton />
-      </aside>
-
-      {/* Canvas area */}
-      <div className="canvas-area">
-        {/* Toolbar */}
-        <div className="board-toolbar">
+      {/* Full-width toolbar */}
+      <div className="board-toolbar">
           {/* Flow selector */}
           <div className="flow-selector" onClick={() => setShowFlowMenu((v) => !v)}>
             <span className="flow-selector-name">
@@ -974,12 +998,23 @@ export function NodeBoard({ onRefresh }: Props) {
 
           <div className="toolbar-gap" />
 
-          <button className="btn-ghost toolbar-btn" onClick={handleNewFlow} title="New skilltree">
-            <Plus size={14} /> New Skilltree
-          </button>
-
           {activeFlow && (
             <>
+              <button className="btn-ghost toolbar-btn toolbar-icon-btn" onClick={undo} disabled={!canUndo || isRunning} title="Undo (⌘Z)">
+                <Undo2 size={14} />
+              </button>
+              <button className="btn-ghost toolbar-btn toolbar-icon-btn" onClick={redo} disabled={!canRedo || isRunning} title="Redo (⌘⇧Z)">
+                <Redo2 size={14} />
+              </button>
+              <button
+                className="btn-ghost toolbar-btn toolbar-icon-btn"
+                onClick={handleCloseFlow}
+                disabled={isRunning}
+                title="Close skilltree"
+              >
+                <X size={14} />
+              </button>
+              <div className="toolbar-separator" />
               <button
                 className={`btn-secondary toolbar-btn save-btn ${saved ? 'saved' : ''}`}
                 onClick={handleSave}
@@ -1002,8 +1037,8 @@ export function NodeBoard({ onRefresh }: Props) {
                 <button
                   className="btn-primary toolbar-btn"
                   onClick={handleRun}
-                  disabled={dirty || hasEmptyArgs}
-                  title={dirty ? 'Save before running' : hasEmptyArgs ? 'Fill in all argument inputs before running' : 'Run skilltree step by step'}
+                  disabled={dirty || hasEmptyArgs || !claudeAvailable}
+                  title={!claudeAvailable ? 'Claude Code not installed — run: npm i -g @anthropic-ai/claude-code' : dirty ? 'Save before running' : hasEmptyArgs ? 'Fill in all argument inputs before running' : 'Run skilltree step by step'}
                 >
                   <Play size={14} /> Run
                 </button>
@@ -1026,8 +1061,60 @@ export function NodeBoard({ onRefresh }: Props) {
               </button>
             </>
           )}
-        </div>
+      </div>
 
+      {/* Three-column content area */}
+      <div className="board-content">
+
+      {/* Left palette */}
+      <aside className="skill-palette">
+        <div className="palette-search-wrap">
+          <input
+            className="palette-search nodrag nopan nowheel"
+            placeholder="Search skills…"
+            value={skillSearch}
+            onChange={(e) => setSkillSearch(e.target.value)}
+            spellCheck={false}
+          />
+          {skillSearch && (
+            <button className="palette-search-clear" onClick={() => setSkillSearch('')}>
+              <X size={10} />
+            </button>
+          )}
+        </div>
+        <div className="palette-list">
+          {(() => {
+            const q = skillSearch.trim().toLowerCase()
+            const visible = q
+              ? skills.filter((s) => s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q))
+              : skills
+            if (visible.length === 0)
+              return <div className="palette-empty">{q ? 'No matches' : 'No skills loaded'}</div>
+            return visible.map((skill) => (
+              <div
+                key={`${skill.scope}-${skill.name}`}
+                className={`palette-item ${isRunning || !activeFlow ? 'disabled' : ''}`}
+                draggable={!isRunning && !!activeFlow}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/skilltree', JSON.stringify(skill))
+                  e.dataTransfer.effectAllowed = 'copy'
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  setPaletteMenu({ skill, x: e.clientX, y: e.clientY })
+                }}
+              >
+                <span className="palette-item-name">{skill.name}</span>
+                <span className={`palette-badge ${skill.scope}`}>{skill.scope === 'global' ? 'G' : skill.scope === 'library' ? 'L' : 'P'}</span>
+              </div>
+            ))
+          })()}
+        </div>
+        <GithubButton />
+      </aside>
+
+      {/* Canvas area */}
+      <div className="canvas-area">
         {/* React Flow canvas */}
         <div
           className="rf-wrapper"
@@ -1058,6 +1145,7 @@ export function NodeBoard({ onRefresh }: Props) {
                   selected: false,
                 }])
                 setDirty(true)
+                setAnnotationTool(null)
               } else if (tool === 'pencil') {
                 pencilRef.current = { screenPts: [{ x: e.clientX, y: e.clientY }] }
                 setPencilOverlay([{ x: e.clientX, y: e.clientY }])
@@ -1090,6 +1178,35 @@ export function NodeBoard({ onRefresh }: Props) {
               <button className="btn-primary" onClick={handleNewFlow}>
                 <Plus size={14} /> New Skilltree
               </button>
+              {(() => {
+                const recent = [...flows]
+                  .sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+                  .slice(0, 4)
+                if (!recent.length) return null
+                return (
+                  <div className="no-flow-recent">
+                    <span className="no-flow-recent-label">Recent</span>
+                    <div className="no-flow-recent-grid">
+                      {recent.map((f) => (
+                        <div
+                          key={f.id}
+                          className="no-flow-card"
+                          onClick={() => setSelectedFlowId(f.id)}
+                        >
+                          <div className="no-flow-card-name">{f.name}</div>
+                          {f.description && (
+                            <div className="no-flow-card-desc">{f.description}</div>
+                          )}
+                          <div className="no-flow-card-meta">
+                            {f.nodes.length} node{f.nodes.length !== 1 ? 's' : ''}
+                            {f.edges.length > 0 && ` · ${f.edges.length} connection${f.edges.length !== 1 ? 's' : ''}`}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
             </div>
           ) : (
             <SetDirtyContext.Provider value={() => setDirty(true)}>
@@ -1123,6 +1240,8 @@ export function NodeBoard({ onRefresh }: Props) {
               deleteKeyCode={null}
               nodesDraggable={!isRunning}
               nodesConnectable={!isRunning}
+              onNodeDragStart={() => pushHistory()}
+              onNodeDragStop={() => { setCanUndo(true); setCanRedo(false) }}
               panOnDrag={annotationTool === null}
               proOptions={{ hideAttribution: true }}
             >
@@ -1172,6 +1291,40 @@ export function NodeBoard({ onRefresh }: Props) {
         />
       )}
 
+      {pendingClose && (
+        <UnsavedDialog
+          onSave={async () => {
+            await handleSave()
+            setSelectedFlowId(null)
+            setPendingClose(false)
+          }}
+          onDiscard={() => {
+            setDirty(false)
+            setSelectedFlowId(null)
+            setPendingClose(false)
+          }}
+          onCancel={() => setPendingClose(false)}
+        />
+      )}
+
+      {pendingSkillPreview && (
+        <UnsavedDialog
+          onSave={async () => {
+            await handleSave()
+            setPreviewSkill({ name: pendingSkillPreview.name, scope: pendingSkillPreview.scope })
+            setView('skills')
+            setPendingSkillPreview(null)
+          }}
+          onDiscard={() => {
+            setDirty(false)
+            setPreviewSkill({ name: pendingSkillPreview.name, scope: pendingSkillPreview.scope })
+            setView('skills')
+            setPendingSkillPreview(null)
+          }}
+          onCancel={() => setPendingSkillPreview(null)}
+        />
+      )}
+
       {/* Edge context menu */}
       {edgeMenu && (() => {
         const menuEdge = edges.find((e) => e.id === edgeMenu.edgeId)
@@ -1198,6 +1351,19 @@ export function NodeBoard({ onRefresh }: Props) {
           onRemove={() => removeNode(nodeMenu.nodeId)}
           onDuplicate={() => duplicateNode(nodeMenu.nodeId)}
           onClose={() => setNodeMenu(null)}
+        />
+      )}
+
+      {/* Palette skill context menu */}
+      {paletteMenu && (
+        <PaletteSkillMenu
+          x={paletteMenu.x}
+          y={paletteMenu.y}
+          onPreview={() => {
+            handlePreviewSkill(paletteMenu.skill)
+            setPaletteMenu(null)
+          }}
+          onClose={() => setPaletteMenu(null)}
         />
       )}
 
@@ -1293,6 +1459,65 @@ export function NodeBoard({ onRefresh }: Props) {
           </div>
         </div>
       )}
+
+      {/* Right panel — Building Blocks + Markups */}
+      <aside className="right-panel">
+        <div className="palette-tools-section">
+          <div className="palette-tools-header">Building Blocks</div>
+          <div className="palette-tools-list">
+            {([
+              { blockType: 'text',      icon: <Type size={13} />,              label: 'Prompt'      },
+              { blockType: 'command',   icon: <Terminal size={13} />,          label: 'Run Command'     },
+              { blockType: 'file',      icon: <Paperclip size={13} />,         label: 'File Input'      },
+              { blockType: 'context',   icon: <Globe size={13} />,             label: 'Context Injector'},
+              { blockType: 'variable',  icon: <Braces size={13} />,            label: 'Variable'        },
+              { blockType: 'output',    icon: <HardDriveDownload size={13} />, label: 'Output Capture'  },
+              { blockType: 'http',      icon: <Wifi size={13} />,              label: 'HTTP Request'    },
+              { blockType: 'gate',      icon: <ShieldAlert size={13} />,       label: 'Approval Gate'   },
+              { blockType: 'mcp',       icon: <Braces size={13} />,            label: 'MCP Tool'        },
+              { blockType: 'condition', icon: <GitBranch size={13} />,         label: 'Condition'       },
+              { blockType: 'loop',      icon: <Repeat size={13} />,            label: 'Loop'            },
+            ] as const).map(({ blockType, icon, label }) => (
+              <div
+                key={blockType}
+                className={`palette-item ${isRunning || !activeFlow ? 'disabled' : ''}`}
+                draggable={!isRunning && !!activeFlow}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/skilltree-block', JSON.stringify({ blockType }))
+                  e.dataTransfer.effectAllowed = 'copy'
+                }}
+              >
+                <span className="palette-item-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {icon}{label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="palette-tools-section">
+          <div className="palette-tools-header">Markups</div>
+          <div className="palette-tools-list">
+            {([
+              { tool: 'text',   icon: <Type size={13} />,       label: 'Text'   },
+              { tool: 'sticky', icon: <StickyNote size={13} />, label: 'Sticky' },
+              { tool: 'pencil', icon: <Pen size={13} />,        label: 'Pencil' },
+            ] as const).map(({ tool, icon, label }) => (
+              <button
+                key={tool}
+                className={`palette-tool-btn ${annotationTool === tool ? 'active' : ''}`}
+                onClick={() => !isRunning && !!activeFlow && setAnnotationTool(annotationTool === tool ? null : tool)}
+                disabled={isRunning || !activeFlow}
+                title={label}
+              >
+                {icon}
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </aside>
+      </div>{/* end board-content */}
     </div>
   )
 }
@@ -1351,26 +1576,27 @@ function FlowMiniMap() {
     return { x: mx * MM_SCALE - MM_OFFSET, y: my * MM_SCALE - MM_OFFSET }
   }
 
-  const navigate = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
+  const panTo = useCallback((e: React.MouseEvent<SVGSVGElement>, animated: boolean) => {
     const svg = svgRef.current
     if (!svg) return
     const rect = svg.getBoundingClientRect()
     const mx = ((e.clientX - rect.left) / rect.width) * MM_W
     const my = ((e.clientY - rect.top) / rect.height) * MM_H
     const { x: fx, y: fy } = minimapToFlow(mx, my)
-    setViewport({ x: -fx * zoom + cw / 2, y: -fy * zoom + ch / 2, zoom }, { duration: 150 })
+    const opts = animated ? { duration: 150 } : undefined
+    setViewport({ x: -fx * zoom + cw / 2, y: -fy * zoom + ch / 2, zoom }, opts)
   }, [zoom, cw, ch, setViewport])
 
-  // Drag support
+  // Drag support — no animation during drag to prevent zoom drift from overlapping transitions
   const dragging = useRef(false)
   const onMouseDown = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     dragging.current = true
-    navigate(e)
-  }, [navigate])
+    panTo(e, false)
+  }, [panTo])
   const onMouseMove = useCallback((e: React.MouseEvent<SVGSVGElement>) => {
     if (!dragging.current) return
-    navigate(e)
-  }, [navigate])
+    panTo(e, false)
+  }, [panTo])
   const onMouseUp = useCallback(() => { dragging.current = false }, [])
 
   return (
@@ -1438,6 +1664,33 @@ function NodeContextMenu({
       <button className="edge-menu-item danger" onClick={onRemove}>
         <Trash2 size={13} />
         Remove node
+      </button>
+    </div>
+  )
+}
+
+function PaletteSkillMenu({
+  x, y, onPreview, onClose,
+}: {
+  x: number; y: number
+  onPreview: () => void
+  onClose: () => void
+}) {
+  useEffect(() => {
+    const handler = () => onClose()
+    window.addEventListener('click', handler)
+    return () => window.removeEventListener('click', handler)
+  }, [onClose])
+
+  return (
+    <div
+      className="edge-context-menu"
+      style={{ left: x, top: y }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <button className="edge-menu-item" onClick={onPreview}>
+        <Eye size={13} />
+        Preview skill
       </button>
     </div>
   )

@@ -601,6 +601,9 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 		})
 	}
 
+	// exportVars accumulates Variable node values for inline substitution.
+	exportVars := map[string]string{}
+
 	totalNodes := len(flow.Nodes)
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "# Workflow: %s\n\n", flow.Name)
@@ -646,8 +649,38 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 			label, _ := node.Data["label"].(string)
 
 			switch node.Type {
+			case "block-variable":
+				if varsList, ok := node.Data["variables"].([]interface{}); ok {
+					for _, item := range varsList {
+						if entry, ok := item.(map[string]interface{}); ok {
+							name, _ := entry["name"].(string)
+							value, _ := entry["value"].(string)
+							if strings.TrimSpace(name) != "" {
+								exportVars[name] = value
+							}
+						}
+					}
+				}
+				if label == "" {
+					label = "Variables"
+				}
+				fmt.Fprintf(&sb, "### %s *(variables)*\n\n", label)
+				if varsList, ok := node.Data["variables"].([]interface{}); ok {
+					for _, item := range varsList {
+						if entry, ok := item.(map[string]interface{}); ok {
+							name, _ := entry["name"].(string)
+							value, _ := entry["value"].(string)
+							if name != "" {
+								fmt.Fprintf(&sb, "- `%s` = `%s`\n", name, value)
+							}
+						}
+					}
+				}
+				sb.WriteString("\n")
+
 			case "block-context":
 				content, _ := node.Data["content"].(string)
+				content = applyExportVars(content, exportVars)
 				if label == "" {
 					label = "Context"
 				}
@@ -680,6 +713,7 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 
 			case "block-text":
 				content, _ := node.Data["content"].(string)
+				content = applyExportVars(content, exportVars)
 				if label == "" {
 					label = "Text Block"
 				}
@@ -706,6 +740,8 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 			default: // "skill" node
 				sName, _ := node.Data["skillName"].(string)
 				desc, _ := node.Data["description"].(string)
+				argVal, _ := node.Data["argumentValue"].(string)
+				argVal = applyExportVars(argVal, exportVars)
 				if label == "" {
 					label = sName
 				}
@@ -714,8 +750,11 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 					fmt.Fprintf(&sb, "> %s\n\n", desc)
 				}
 				if libSkill, ok := libraryIndex[sName]; ok {
-					sb.WriteString(strings.TrimSpace(libSkill.Body))
+					body := applyExportVars(libSkill.Body, exportVars)
+					sb.WriteString(strings.TrimSpace(body))
 					sb.WriteString("\n\n")
+				} else if argVal != "" {
+					fmt.Fprintf(&sb, "Invoke `/%s %s`.\n\n", sName, argVal)
 				} else {
 					fmt.Fprintf(&sb, "Invoke `/%s`.\n\n", sName)
 				}
@@ -733,6 +772,14 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 	}
 
 	return a.SaveSkill(generated, "")
+}
+
+// applyExportVars substitutes {{name}} placeholders for export.
+func applyExportVars(s string, vars map[string]string) string {
+	for name, value := range vars {
+		s = strings.ReplaceAll(s, "{{"+name+"}}", value)
+	}
+	return s
 }
 
 // SelectAnyFile opens a native file dialog with no type filter.

@@ -123,6 +123,29 @@ func (a *App) StopFlowRun() {
 	runtime.EventsEmit(a.ctx, "run:stopped")
 }
 
+// applyVars substitutes {{name}} placeholders in s using the vars map.
+func applyVars(s string, vars map[string]string) string {
+	for name, value := range vars {
+		s = strings.ReplaceAll(s, "{{"+name+"}}", value)
+	}
+	return s
+}
+
+// extractVars reads the variables array from a block-variable node's data.
+func extractVars(node FlowNode) map[string]string {
+	out := map[string]string{}
+	list, _ := node.Data["variables"].([]interface{})
+	for _, item := range list {
+		entry, _ := item.(map[string]interface{})
+		name, _ := entry["name"].(string)
+		value, _ := entry["value"].(string)
+		if strings.TrimSpace(name) != "" {
+			out[name] = value
+		}
+	}
+	return out
+}
+
 func (a *App) executeFlow(ctx context.Context, flow Flow) error {
 	claudePath, err := shellWhich("claude")
 	if err != nil {
@@ -142,6 +165,10 @@ func (a *App) executeFlow(ctx context.Context, flow Flow) error {
 
 	a.emitTerminal(fmt.Sprintf("\r\n\x1b[1;37m━━━━━ Running: %s ━━━━━\x1b[0m\r\n", flow.Name))
 
+	// vars accumulates Variable node values across phases.
+	vars := map[string]string{}
+	var varsMu sync.Mutex
+
 	for i, phase := range phases {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -159,7 +186,7 @@ func (a *App) executeFlow(ctx context.Context, flow Flow) error {
 			wg.Add(1)
 			go func(n FlowNode) {
 				defer wg.Done()
-				a.runNode(ctx, n, claudePath, dir)
+				a.runNode(ctx, n, claudePath, dir, vars, &varsMu)
 			}(node)
 		}
 		wg.Wait()
@@ -173,10 +200,17 @@ func (a *App) executeFlow(ctx context.Context, flow Flow) error {
 	return nil
 }
 
-func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string) {
+func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string, vars map[string]string, varsMu *sync.Mutex) {
 	label, _ := node.Data["label"].(string)
 	if label == "" {
 		label = node.Type
+	}
+
+	// Helper: substitute variables then release lock quickly.
+	sub := func(s string) string {
+		varsMu.Lock()
+		defer varsMu.Unlock()
+		return applyVars(s, vars)
 	}
 
 	runtime.EventsEmit(a.ctx, "run:node-active", node.ID)
@@ -184,8 +218,19 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 
 	var runErr error
 	switch node.Type {
+	case "block-variable":
+		varsMu.Lock()
+		for name, value := range extractVars(node) {
+			vars[name] = value
+		}
+		varsMu.Unlock()
+		a.emitTerminal(fmt.Sprintf("\x1b[2m  %d variable(s) defined\x1b[0m\r\n", len(extractVars(node))))
+		runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+		return
+
 	case "block-context":
 		content, _ := node.Data["content"].(string)
+		content = sub(content)
 		if strings.TrimSpace(content) == "" {
 			a.emitTerminal("\x1b[33m⚠ Context injector is empty — skipping\x1b[0m\r\n")
 			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
@@ -208,6 +253,7 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 	case "block-file":
 		filePath, _ := node.Data["filePath"].(string)
 		instruction, _ := node.Data["instruction"].(string)
+		instruction = sub(instruction)
 		if filePath == "" {
 			a.emitTerminal("\x1b[33m⚠ No file selected — skipping\x1b[0m\r\n")
 			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
@@ -228,6 +274,7 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 
 	case "block-text":
 		content, _ := node.Data["content"].(string)
+		content = sub(content)
 		if strings.TrimSpace(content) == "" {
 			a.emitTerminal("\x1b[33m⚠ Text block is empty — skipping\x1b[0m\r\n")
 			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
@@ -247,6 +294,7 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 	default: // skill node
 		skillName, _ := node.Data["skillName"].(string)
 		argumentValue, _ := node.Data["argumentValue"].(string)
+		argumentValue = sub(argumentValue)
 		prompt := a.resolveSkillPrompt(skillName, argumentValue)
 		runErr = a.runClaudePrompt(ctx, claudePath, dir, prompt)
 	}

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useContext } from 'react'
 import { Handle, Position, NodeResizeControl, ResizeControlVariant, useReactFlow } from '@xyflow/react'
-import { Type, Terminal, BookOpen, FolderOpen, Paperclip, Globe, X } from 'lucide-react'
+import { Type, Terminal, BookOpen, FolderOpen, Paperclip, Globe, Braces, Plus, X } from 'lucide-react'
 import { BadgeContext, RunContext, IsRunningContext, SetDirtyContext } from './NodeBoard'
 import { SaveBlockAsLibrarySkill, SelectScriptFile, SelectAnyFile } from '../../wailsjs/go/main/App'
 import './BuildingBlockNodes.css'
@@ -333,6 +333,94 @@ export function ContextInjectorNode({ id, data, selected }: { id: string; data: 
           getContent={() => data.content ?? ''}
           blockType="text"
         />
+      </div>
+    </>
+  )
+}
+
+// ── Variable Node ────────────────────────────────────────────────────────────
+
+interface VarEntry { name: string; value: string }
+
+interface VariableData {
+  label?: string
+  variables?: VarEntry[]
+  [key: string]: unknown
+}
+
+export function VariableNode({ id, data, selected }: { id: string; data: VariableData; selected: boolean }) {
+  const { updateNodeData } = useReactFlow()
+  const isRunning = useContext(IsRunningContext)
+  const runStatus = useContext(RunContext).get(id)
+  const markDirty = useContext(SetDirtyContext)
+
+  const vars: VarEntry[] = (data.variables as VarEntry[] | undefined) ?? []
+
+  function updateVars(next: VarEntry[]) {
+    updateNodeData(id, { ...data, variables: next })
+    markDirty()
+  }
+
+  function setVar(idx: number, field: 'name' | 'value', val: string) {
+    const next = vars.map((v, i) => i === idx ? { ...v, [field]: val } : v)
+    updateVars(next)
+  }
+
+  return (
+    <>
+      <BlockBadge id={id} />
+      <Handle type="target" position={Position.Top} style={HANDLE_STYLE} />
+      <Handle type="source" position={Position.Bottom} style={HANDLE_STYLE} />
+      <BlockResizeControls selected={selected} />
+
+      <div className={`block-node block-variable ${selected ? 'selected' : ''} ${runStatus ?? ''}`}>
+        <div className="block-header">
+          <Braces size={12} className="block-icon" />
+          <input
+            className="block-label-input nodrag nopan nowheel"
+            value={data.label ?? 'Variables'}
+            disabled={isRunning}
+            onChange={(e) => { updateNodeData(id, { ...data, label: e.target.value }); markDirty() }}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        </div>
+        <div className="block-var-list nodrag nopan nowheel">
+          {vars.map((v, i) => (
+            <div key={i} className="block-var-row">
+              <input
+                className="block-var-name"
+                placeholder="name"
+                value={v.name}
+                disabled={isRunning}
+                onChange={(e) => setVar(i, 'name', e.target.value)}
+                onMouseDown={(e) => e.stopPropagation()}
+              />
+              <span className="block-var-eq">=</span>
+              <input
+                className="block-var-value"
+                placeholder="value"
+                value={v.value}
+                disabled={isRunning}
+                onChange={(e) => setVar(i, 'value', e.target.value)}
+                onMouseDown={(e) => e.stopPropagation()}
+              />
+              <button
+                className="block-var-remove"
+                disabled={isRunning}
+                onClick={() => updateVars(vars.filter((_, j) => j !== i))}
+              >
+                <X size={9} />
+              </button>
+            </div>
+          ))}
+          <button
+            className="block-var-add nodrag nopan"
+            disabled={isRunning}
+            onClick={() => updateVars([...vars, { name: '', value: '' }])}
+          >
+            <Plus size={10} /> Add variable
+          </button>
+        </div>
       </div>
     </>
   )

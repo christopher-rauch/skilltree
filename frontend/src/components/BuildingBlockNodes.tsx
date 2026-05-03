@@ -1,9 +1,24 @@
-import { useState, useRef, useEffect, useContext } from 'react'
+import { useState, useRef, useEffect, useContext, useCallback } from 'react'
 import { Handle, Position, NodeResizeControl, ResizeControlVariant, useReactFlow } from '@xyflow/react'
-import { Type, Terminal, BookOpen, FolderOpen, Paperclip, Globe, Braces, Plus, X, Wifi, ShieldAlert, GitBranch, Repeat } from 'lucide-react'
+import { Type, Terminal, BookOpen, FolderOpen, Paperclip, Globe, Braces, Plus, X, Wifi, ShieldAlert, GitBranch, Repeat, RefreshCw } from 'lucide-react'
 import { BadgeContext, RunContext, IsRunningContext, SetDirtyContext } from './NodeBoard'
-import { SaveBlockAsLibrarySkill, SelectScriptFile, SelectAnyFile, GetMCPServers } from '../../wailsjs/go/main/App'
+import { SaveBlockAsLibrarySkill, SelectScriptFile, SelectAnyFile, GetMCPServers, ListMCPTools } from '../../wailsjs/go/main/App'
 import './BuildingBlockNodes.css'
+
+// Keeps a local copy of a string value that syncs from external changes (e.g.
+// undo/redo) without overwriting in-progress edits. Using local state prevents
+// React's controlled-input reconciliation from resetting the cursor position on
+// each keystroke when the parent re-renders due to dirty/store updates.
+function useLocalValue(external: string | undefined): [string, (v: string) => void] {
+  const [local, setLocal] = useState(external ?? '')
+  const ownUpdate = useRef(false)
+  useEffect(() => {
+    if (!ownUpdate.current) setLocal(external ?? '')
+    ownUpdate.current = false
+  }, [external])
+  const set = useCallback((v: string) => { ownUpdate.current = true; setLocal(v) }, [])
+  return [local, set]
+}
 
 const HANDLE_STYLE = {
   width: 10, height: 10, borderRadius: '50%',
@@ -97,7 +112,7 @@ function SaveToLibrary({ id, getContent, blockType }: {
   )
 }
 
-// ── Text Block ───────────────────────────────────────────────────────────────
+// ── Prompt ───────────────────────────────────────────────────────────────
 
 interface TextBlockData {
   label?: string
@@ -111,6 +126,8 @@ export function TextBlockNode({ id, data, selected }: { id: string; data: TextBl
   const isRunning = useContext(IsRunningContext)
   const runStatus = useContext(RunContext).get(id)
   const markDirty = useContext(SetDirtyContext)
+  const [label, setLabel] = useLocalValue(data.label as string | undefined)
+  const [content, setContent] = useLocalValue(data.content as string | undefined)
 
   return (
     <>
@@ -124,9 +141,9 @@ export function TextBlockNode({ id, data, selected }: { id: string; data: TextBl
           <Type size={12} className="block-icon" />
           <input
             className="block-label-input nodrag nopan nowheel"
-            value={data.label ?? 'Text Block'}
+            value={label || 'Prompt'}
             disabled={isRunning}
-            onChange={(e) => { updateNodeData(id, { ...data, label: e.target.value }); markDirty() }}
+            onChange={(e) => { setLabel(e.target.value); updateNodeData(id, { ...data, label: e.target.value }); markDirty() }}
             onMouseDown={(e) => e.stopPropagation()}
           />
           {data.savedSkillName && <span className="block-saved-badge">library</span>}
@@ -134,9 +151,9 @@ export function TextBlockNode({ id, data, selected }: { id: string; data: TextBl
         <textarea
           className="block-textarea nodrag nopan nowheel"
           placeholder="Type instructions for Claude…"
-          value={data.content ?? ''}
+          value={content}
           disabled={isRunning}
-          onChange={(e) => { updateNodeData(id, { ...data, content: e.target.value }); markDirty() }}
+          onChange={(e) => { setContent(e.target.value); updateNodeData(id, { ...data, content: e.target.value }); markDirty() }}
           onMouseDown={(e) => e.stopPropagation()}
         />
         <SaveToLibrary
@@ -164,6 +181,7 @@ export function FileInputNode({ id, data, selected }: { id: string; data: FileIn
   const isRunning = useContext(IsRunningContext)
   const runStatus = useContext(RunContext).get(id)
   const markDirty = useContext(SetDirtyContext)
+  const [instruction, setInstruction] = useLocalValue(data.instruction as string | undefined)
 
   const basename = data.filePath ? data.filePath.split('/').pop() ?? data.filePath : ''
 
@@ -202,9 +220,9 @@ export function FileInputNode({ id, data, selected }: { id: string; data: FileIn
         <textarea
           className="block-textarea nodrag nopan nowheel"
           placeholder="Instruction (optional) — how Claude should use this file…"
-          value={data.instruction ?? ''}
+          value={instruction}
           disabled={isRunning}
-          onChange={(e) => { updateNodeData(id, { ...data, instruction: e.target.value }); markDirty() }}
+          onChange={(e) => { setInstruction(e.target.value); updateNodeData(id, { ...data, instruction: e.target.value }); markDirty() }}
           onMouseDown={(e) => e.stopPropagation()}
         />
         <SaveToLibrary
@@ -300,6 +318,7 @@ export function ContextInjectorNode({ id, data, selected }: { id: string; data: 
   const isRunning = useContext(IsRunningContext)
   const runStatus = useContext(RunContext).get(id)
   const markDirty = useContext(SetDirtyContext)
+  const [content, setContent] = useLocalValue(data.content as string | undefined)
 
   return (
     <>
@@ -323,9 +342,9 @@ export function ContextInjectorNode({ id, data, selected }: { id: string; data: 
         <textarea
           className="block-textarea nodrag nopan nowheel"
           placeholder="Static context for all downstream steps — project background, constraints, style guide…"
-          value={data.content ?? ''}
+          value={content}
           disabled={isRunning}
-          onChange={(e) => { updateNodeData(id, { ...data, content: e.target.value }); markDirty() }}
+          onChange={(e) => { setContent(e.target.value); updateNodeData(id, { ...data, content: e.target.value }); markDirty() }}
           onMouseDown={(e) => e.stopPropagation()}
         />
         <SaveToLibrary
@@ -704,6 +723,7 @@ export function ApprovalGateNode({ id, data, selected }: { id: string; data: App
   const isRunning = useContext(IsRunningContext)
   const runStatus = useContext(RunContext).get(id)
   const markDirty = useContext(SetDirtyContext)
+  const [message, setMessage] = useLocalValue(data.message as string | undefined)
 
   return (
     <>
@@ -726,9 +746,9 @@ export function ApprovalGateNode({ id, data, selected }: { id: string; data: App
         <textarea
           className="block-textarea nodrag nopan nowheel"
           placeholder="Message shown to the user when the flow pauses here…"
-          value={data.message ?? ''}
+          value={message}
           disabled={isRunning}
-          onChange={(e) => { updateNodeData(id, { ...data, message: e.target.value }); markDirty() }}
+          onChange={(e) => { setMessage(e.target.value); updateNodeData(id, { ...data, message: e.target.value }); markDirty() }}
           onMouseDown={(e) => e.stopPropagation()}
         />
       </div>
@@ -754,11 +774,26 @@ export function MCPToolNode({ id, data, selected }: { id: string; data: MCPToolD
   const markDirty = useContext(SetDirtyContext)
 
   const [servers, setServers] = useState<string[]>([])
+  const [tools, setTools] = useState<string[]>([])
+  const [loadingTools, setLoadingTools] = useState(false)
   const args: HttpKV[] = (data.args as HttpKV[] | undefined) ?? []
 
   useEffect(() => {
     GetMCPServers().then(setServers).catch(() => {})
   }, [])
+
+  // Clear tools when server changes
+  useEffect(() => { setTools([]) }, [data.serverName])
+
+  async function handleLoadTools() {
+    if (!data.serverName) return
+    setLoadingTools(true)
+    try {
+      const names = await ListMCPTools(data.serverName as string)
+      setTools(names)
+    } catch { setTools([]) }
+    finally { setLoadingTools(false) }
+  }
 
   function update(patch: Partial<MCPToolData>) {
     updateNodeData(id, { ...data, ...patch })
@@ -802,16 +837,37 @@ export function MCPToolNode({ id, data, selected }: { id: string; data: MCPToolD
           </select>
         </div>
 
-        {/* Tool name */}
+        {/* Tool name — dropdown when tools loaded, text input otherwise */}
         <div className="block-url-row nodrag nopan nowheel">
-          <input
-            className="block-url-input nodrag nopan nowheel"
-            placeholder="Tool name (e.g. createJiraIssue)"
-            value={data.toolName ?? ''}
-            disabled={isRunning}
-            onChange={(e) => update({ toolName: e.target.value })}
-            onMouseDown={(e) => e.stopPropagation()}
-          />
+          {tools.length > 0 ? (
+            <select
+              className="block-mcp-select nodrag nopan nowheel"
+              value={data.toolName ?? ''}
+              disabled={isRunning}
+              onChange={(e) => update({ toolName: e.target.value })}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <option value="">Select tool…</option>
+              {tools.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          ) : (
+            <input
+              className="block-url-input nodrag nopan nowheel"
+              placeholder="Tool name…"
+              value={data.toolName ?? ''}
+              disabled={isRunning}
+              onChange={(e) => update({ toolName: e.target.value })}
+              onMouseDown={(e) => e.stopPropagation()}
+            />
+          )}
+          <button
+            className="block-browse-btn nodrag nopan"
+            onClick={handleLoadTools}
+            disabled={isRunning || !data.serverName || loadingTools}
+            title="Load available tools"
+          >
+            <RefreshCw size={12} className={loadingTools ? 'spin' : ''} />
+          </button>
         </div>
 
         {/* Args */}
@@ -862,6 +918,7 @@ export function ConditionNode({ id, data, selected }: { id: string; data: Condit
   const isRunning = useContext(IsRunningContext)
   const runStatus = useContext(RunContext).get(id)
   const markDirty = useContext(SetDirtyContext)
+  const [condition, setCondition] = useLocalValue(data.condition as string | undefined)
 
   const handleBase = { width: 10, height: 10, borderRadius: '50%', background: 'var(--surface-3)', border: '2px solid var(--border-2)' }
   const yesStyle = { ...handleBase, border: '2px solid #22c55e' }
@@ -872,8 +929,8 @@ export function ConditionNode({ id, data, selected }: { id: string; data: Condit
       <BlockBadge id={id} />
       <Handle type="target" position={Position.Top} style={handleBase} />
       {/* Yes = right, No = bottom */}
-      <Handle id="source-yes" type="source" position={Position.Right}  style={yesStyle} />
-      <Handle id="source-no"  type="source" position={Position.Bottom} style={noStyle}  />
+      <Handle id="source-yes" type="source" position={Position.Right} style={yesStyle}  />
+      <Handle id="source-no"  type="source" position={Position.Left}  style={noStyle}   />
       <BlockResizeControls selected={selected} />
 
       <div className={`block-node block-condition ${selected ? 'selected' : ''} ${runStatus ?? ''}`}>
@@ -890,14 +947,14 @@ export function ConditionNode({ id, data, selected }: { id: string; data: Condit
         <textarea
           className="block-textarea nodrag nopan nowheel"
           placeholder="Condition for Claude to evaluate — e.g. 'Does the output contain errors?'"
-          value={data.condition ?? ''}
+          value={condition}
           disabled={isRunning}
-          onChange={(e) => { updateNodeData(id, { ...data, condition: e.target.value }); markDirty() }}
+          onChange={(e) => { setCondition(e.target.value); updateNodeData(id, { ...data, condition: e.target.value }); markDirty() }}
           onMouseDown={(e) => e.stopPropagation()}
         />
         <div className="block-condition-legend nodrag nopan">
-          <span className="block-condition-yes">→ Yes (right)</span>
-          <span className="block-condition-no">→ No (bottom)</span>
+          <span className="block-condition-no">← No</span>
+          <span className="block-condition-yes">Yes →</span>
         </div>
       </div>
     </>
@@ -918,6 +975,7 @@ export function LoopNode({ id, data, selected }: { id: string; data: LoopData; s
   const isRunning = useContext(IsRunningContext)
   const runStatus = useContext(RunContext).get(id)
   const markDirty = useContext(SetDirtyContext)
+  const [prompt, setPrompt] = useLocalValue(data.prompt as string | undefined)
 
   return (
     <>
@@ -952,9 +1010,9 @@ export function LoopNode({ id, data, selected }: { id: string; data: LoopData; s
         <textarea
           className="block-textarea nodrag nopan nowheel"
           placeholder="Prompt to run each iteration. Use {{iteration}} for current count, {{total_iterations}} for total."
-          value={data.prompt ?? ''}
+          value={prompt}
           disabled={isRunning}
-          onChange={(e) => { updateNodeData(id, { ...data, prompt: e.target.value }); markDirty() }}
+          onChange={(e) => { setPrompt(e.target.value); updateNodeData(id, { ...data, prompt: e.target.value }); markDirty() }}
           onMouseDown={(e) => e.stopPropagation()}
         />
       </div>

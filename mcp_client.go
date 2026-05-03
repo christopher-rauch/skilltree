@@ -178,6 +178,66 @@ func (c *mcpClientConn) initialize() error {
 	return c.send(rpcRequest{JSONRPC: "2.0", Method: "notifications/initialized"})
 }
 
+// ListMCPTools returns the available tools from the named MCP server.
+func (a *App) ListMCPTools(serverName string) ([]string, error) {
+	settings, err := readClaudeSettings()
+	if err != nil {
+		return nil, fmt.Errorf("could not read ~/.claude.json: %w", err)
+	}
+	def, ok := settings.MCPServers[serverName]
+	if !ok {
+		return nil, fmt.Errorf("MCP server %q not found", serverName)
+	}
+	if def.Type != "" && def.Type != "stdio" {
+		return nil, fmt.Errorf("only stdio MCP servers are supported")
+	}
+
+	ctx, cancel := context.WithTimeout(a.ctx, 15*time.Second)
+	defer cancel()
+
+	client, cleanup, err := newMCPClient(ctx, def)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+
+	if err := client.initialize(); err != nil {
+		return nil, err
+	}
+
+	if err := client.send(rpcRequest{
+		JSONRPC: "2.0",
+		ID:      2,
+		Method:  "tools/list",
+	}); err != nil {
+		return nil, err
+	}
+
+	resp, err := client.readUntilID(2)
+	if err != nil {
+		return nil, err
+	}
+	if resp.Error != nil {
+		b, _ := json.Marshal(resp.Error)
+		return nil, fmt.Errorf("MCP error: %s", string(b))
+	}
+
+	var result struct {
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	b, _ := json.Marshal(resp.Result)
+	if err := json.Unmarshal(b, &result); err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(result.Tools))
+	for _, t := range result.Tools {
+		names = append(names, t.Name)
+	}
+	return names, nil
+}
+
 // InvokeMCPTool starts the named MCP server, initializes it, calls the tool,
 // and returns the raw result JSON as a string.
 func (a *App) InvokeMCPTool(serverName, toolName string, args map[string]interface{}) (string, error) {

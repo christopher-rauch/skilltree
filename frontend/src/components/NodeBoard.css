@@ -93,6 +93,59 @@
   color: var(--amber);
 }
 
+.palette-badge.library {
+  background: rgba(139, 92, 246, 0.12);
+  color: #8b5cf6;
+}
+
+/* ---- Canvas Tools ---- */
+.palette-tools-section {
+  border-top: 1px solid var(--border);
+  padding: 8px 6px;
+  flex-shrink: 0;
+}
+
+.palette-tools-header {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 0 4px 6px;
+}
+
+.palette-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.palette-tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+  text-align: left;
+}
+
+.palette-tool-btn:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.palette-tool-btn.active {
+  background: var(--primary-ghost);
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
 /* ---- Canvas area ---- */
 .canvas-area {
   flex: 1;
@@ -302,6 +355,15 @@
   flex: 1;
   position: relative;
   background: var(--bg);
+}
+
+.marquee-box {
+  position: fixed;
+  border: 1px solid var(--primary);
+  background: var(--primary-ghost);
+  pointer-events: none;
+  z-index: 1000;
+  border-radius: 2px;
 }
 
 /* Override React Flow colors */

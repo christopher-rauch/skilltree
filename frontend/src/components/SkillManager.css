@@ -48,6 +48,21 @@
   background: transparent;
 }
 
+.scope-tab.active.scope-global {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+.scope-tab.active.scope-project {
+  color: var(--amber);
+  border-bottom-color: var(--amber);
+}
+
+.scope-tab.active.scope-library {
+  color: #8b5cf6;
+  border-bottom-color: #8b5cf6;
+}
+
 .skill-list-header {
   display: flex;
   align-items: center;

@@ -10,20 +10,34 @@ Built with [Wails](https://wails.io) (Go + React/TypeScript).
 
 ### Skills Manager
 - Browse, create, edit, and delete Claude skills (`SKILL.md` files)
-- Toggle between **global** (`~/.claude/skills/`) and **project-scoped** (`.claude/skills/`) skills
+- Three scopes with color-coded tabs and badges:
+  - **Global** (`~/.claude/skills/`) — available in all Claude Code sessions
+  - **Project** (`.claude/skills/`) — scoped to the open project; collaborator warnings on create, edit, and delete
+  - **Library** (`~/.claude/skilltree/skills/`) — private building blocks used inside skilltrees; inlined into exported skill files rather than invoked by name, so exports are fully self-contained
+- Changing a skill's scope prompts **Move** or **Duplicate** — no silent copies
 - Full frontmatter editing: name, description, argument hints, allowed tools, and body
 
 ### Skilltrees (Builder)
 - Drag skills from the palette onto a canvas and connect them into directed workflows
+- **Single-input constraint**: each node may have at most one incoming connection; the UI blocks multi-input connections and disables "Reverse direction" when it would violate this
 - **Concurrent phases**: nodes at the same topological level are grouped as parallel steps
 - **Cycle prevention**: connecting nodes that would form a loop is blocked
+- **Phase badges**: circular number badges on each connected node show its position in the flow (`1`, `2a`, `2b`, …); letters follow branch lineage consistently down the tree; free-floating nodes show no badge
 - Resize nodes by dragging corner handles; sizes persist on save
 - Right-click any node or connection for a context menu (delete, duplicate, reverse direction)
+- **Right-click marquee selection**: hold right-click and drag on the canvas to rubber-band select multiple nodes; drag selected nodes together
 - Unsaved-change guards on navigation and skilltree switching
-- Gap detection: a warning indicator flags unconnected nodes or disconnected subgraphs
+- Gap detection: a warning indicator flags unconnected skill nodes or disconnected subgraphs
+
+### Canvas Annotation Tools
+Three non-destructive tools in the Builder palette that persist with the canvas but are invisible to the export and flow logic:
+- **Text** — click the canvas to drop an editable text label; double-click to re-edit
+- **Sticky Note** — same as text but with a colored card; five color swatches to choose from; double-click to edit
+- **Pencil** — hold left-click and drag to draw freehand strokes; stroke is committed as a resizable drawing node on release
 
 ### Export as Skill
 - Converts a skilltree into a new `SKILL.md` that sequences all connected skills
+- **Library skills are inlined**: their body is embedded directly rather than referenced by name, making the exported file fully self-contained and runnable in any Claude Code session without extra configuration
 - Sequential steps use phase ordering; concurrent nodes within the same phase are explicitly grouped
 - Export to global or project scope
 
@@ -78,8 +92,9 @@ wails build
 Skills are Claude Code slash commands stored as `SKILL.md` files:
 
 ```
-~/.claude/skills/my-skill/SKILL.md          ← global
-<project>/.claude/skills/my-skill/SKILL.md  ← project-scoped
+~/.claude/skills/my-skill/SKILL.md                    ← global
+<project>/.claude/skills/my-skill/SKILL.md            ← project-scoped
+~/.claude/skilltree/skills/my-skill/SKILL.md          ← library
 ```
 
 Each file has YAML frontmatter and a markdown body:
@@ -99,7 +114,7 @@ Instructions for Claude...
 
 ### Skilltrees
 
-Skilltrees are JSON files stored in `~/.claude/skilltree/flows/`. Each file records node positions, sizes, and edge connections. Exporting generates a new `SKILL.md` with phase-ordered instructions:
+Skilltrees are JSON files stored in `~/.claude/skilltree/flows/`. Each file records node positions, sizes, edge connections, and canvas annotations. Exporting generates a new `SKILL.md` with phase-ordered instructions. Library skills are inlined; global/project skills are invoked by name:
 
 ```markdown
 # Workflow: My Workflow
@@ -108,8 +123,8 @@ Execute the phases below in order. Within each phase, all listed skills
 can be run concurrently...
 
 ## Phase 1
-### skill-a
-Invoke `/skill-a`.
+### setup (library skill — inlined)
+[body of the library skill embedded here]
 
 ## Phase 2 *(concurrent)*
 ### skill-b
@@ -161,6 +176,7 @@ skilltree/
             ├── SkillEditor.tsx        # Create/edit skill modal
             ├── NodeBoard.tsx          # Builder canvas (React Flow)
             ├── SkillNode.tsx          # Custom React Flow node
+            ├── AnnotationNodes.tsx    # Text, sticky, and drawing annotation nodes
             ├── SkillTrees.tsx         # Skilltrees gallery page
             ├── Terminal.tsx           # xterm.js terminal component
             ├── ProjectScopeInfo.tsx   # Shared project scope UI

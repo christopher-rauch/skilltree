@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useStore } from '../store'
 import { Skill, SkillScope } from '../types'
 import { SkillEditor } from './SkillEditor'
-import { Plus, Trash2, Edit2, Globe, Folder, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, Edit2, Globe, Folder, BookOpen, ChevronRight } from 'lucide-react'
 import './SkillManager.css'
 import { DeleteSkill } from '../../wailsjs/go/main/App'
 import { GithubButton } from './GithubButton'
@@ -17,6 +17,7 @@ export function SkillManager({ onRefresh }: Props) {
   const [creating, setCreating] = useState<SkillScope | null>(null)
   const [selected, setSelected] = useState<Skill | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<Skill | null>(null)
+  const [projectPrompt, setProjectPrompt] = useState<{ action: 'create' | 'edit'; skill?: Skill } | null>(null)
 
   const scopeSkills = skills.filter((s) => s.scope === activeScope)
 
@@ -54,27 +55,35 @@ export function SkillManager({ onRefresh }: Props) {
       <aside className="skill-sidebar">
         <div className="scope-tabs">
           <button
-            className={`scope-tab ${activeScope === 'global' ? 'active' : ''}`}
+            className={`scope-tab scope-global ${activeScope === 'global' ? 'active' : ''}`}
             onClick={() => { setActiveScope('global'); setSelected(null) }}
           >
             <Globe size={13} />
             Global
           </button>
           <button
-            className={`scope-tab ${activeScope === 'project' ? 'active' : ''}`}
+            className={`scope-tab scope-project ${activeScope === 'project' ? 'active' : ''}`}
             onClick={() => { setActiveScope('project'); setSelected(null) }}
             title={projectDir || 'No project open'}
           >
             <Folder size={13} />
             Project
           </button>
+          <button
+            className={`scope-tab scope-library ${activeScope === 'library' ? 'active' : ''}`}
+            onClick={() => { setActiveScope('library'); setSelected(null) }}
+            title="Library skills — inlined into exported skilltrees (~/.claude/skilltree/skills)"
+          >
+            <BookOpen size={13} />
+            Library
+          </button>
         </div>
 
         <div className="skill-list-header">
           <span className="skill-list-count">{scopeSkills.length} skill{scopeSkills.length !== 1 ? 's' : ''}</span>
           <button
-            className="btn-primary btn-sm"
-            onClick={() => setCreating(activeScope)}
+            className={`btn-primary btn-sm scope-${activeScope}`}
+            onClick={() => activeScope === 'project' ? setProjectPrompt({ action: 'create' }) : setCreating(activeScope)}
             title="New skill"
           >
             <Plus size={13} />
@@ -87,6 +96,8 @@ export function SkillManager({ onRefresh }: Props) {
             <div className="skill-list-empty">
               {activeScope === 'project' && !projectDir
                 ? 'Open a project to see project skills'
+                : activeScope === 'library'
+                ? 'No library skills yet — library skills are inlined into exported skilltrees'
                 : 'No skills yet'}
             </div>
           ) : (
@@ -106,7 +117,7 @@ export function SkillManager({ onRefresh }: Props) {
                   <button
                     className="skill-icon-btn"
                     title="Edit"
-                    onClick={(e) => { e.stopPropagation(); setEditing(skill) }}
+                    onClick={(e) => { e.stopPropagation(); skill.scope === 'project' ? setProjectPrompt({ action: 'edit', skill }) : setEditing(skill) }}
                   >
                     <Edit2 size={12} />
                   </button>
@@ -129,7 +140,7 @@ export function SkillManager({ onRefresh }: Props) {
       {/* Detail panel */}
       <div className="skill-detail">
         {displaySkill ? (
-          <SkillDetail skill={displaySkill} onEdit={() => setEditing(displaySkill)} />
+          <SkillDetail skill={displaySkill} onEdit={() => displaySkill.scope === 'project' ? setProjectPrompt({ action: 'edit', skill: displaySkill }) : setEditing(displaySkill)} />
         ) : (
           <div className="empty-state">
             <Edit2 size={32} />
@@ -148,12 +159,41 @@ export function SkillManager({ onRefresh }: Props) {
         />
       )}
 
+      {/* Project scope warning — create or edit */}
+      {projectPrompt && (
+        <div className="modal-overlay" onClick={() => setProjectPrompt(null)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>{projectPrompt.action === 'create' ? 'Project skill' : `Edit "${projectPrompt.skill?.name}"`}</h3>
+            <p>
+              {projectPrompt.action === 'create'
+                ? 'This skill will be saved to .claude/skills/ inside your project and will be visible to all collaborators who open this project.'
+                : 'Changes to this skill will affect all collaborators — it is stored in .claude/skills/ inside the project repository.'}
+            </p>
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={() => setProjectPrompt(null)}>Cancel</button>
+              <button className="btn-primary" onClick={() => {
+                if (projectPrompt.action === 'create') setCreating('project')
+                else setEditing(projectPrompt.skill ?? null)
+                setProjectPrompt(null)
+              }}>
+                {projectPrompt.action === 'create' ? 'Continue' : 'Edit anyway'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete confirmation */}
       {confirmDelete && (
         <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
             <h3>Delete &ldquo;{confirmDelete.name}&rdquo;?</h3>
-            <p>This will permanently remove the skill from disk.</p>
+            <p>
+              This will permanently remove the skill from disk.
+              {confirmDelete.scope === 'project' && (
+                <> It is stored in .claude/skills/ and this deletion will affect all collaborators on this project.</>
+              )}
+            </p>
             <div className="modal-actions">
               <button className="btn-secondary" onClick={() => setConfirmDelete(null)}>
                 Cancel

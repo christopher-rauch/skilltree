@@ -1,3 +1,24 @@
+.node-badge {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--surface-3);
+  border: 1.5px solid var(--border-2);
+  color: var(--text-2);
+  font-size: 9px;
+  font-weight: 700;
+  font-family: var(--mono);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none;
+  letter-spacing: -0.02em;
+}
+
 .skill-node {
   background: var(--surface-2);
   border: 1.5px solid var(--border-2);

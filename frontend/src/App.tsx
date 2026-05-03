@@ -6,14 +6,15 @@ import { NodeBoard } from './components/NodeBoard'
 import { SkillTrees } from './components/SkillTrees'
 import { Terminal } from './components/Terminal'
 import {
-  GetGlobalSkills, GetProjectSkills, GetFlows,
-  GetProjectDir, OpenProjectDirectory,
+  GetGlobalSkills, GetProjectSkills, GetLibrarySkills, GetFlows,
+  GetProjectDir, OpenProjectDirectory, ClearProjectDir,
   NewFlowID, SaveFlow,
   GenerateFlowDescriptions,
   OpenURL,
+  StopTerminal,
 } from '../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../wailsjs/runtime/runtime'
-import { FolderOpen, X, TerminalSquare, ChevronDown } from 'lucide-react'
+import { FolderOpen, X, TerminalSquare, ChevronDown, RotateCcw } from 'lucide-react'
 import logo from './assets/images/skilltree_logo.png'
 
 function App() {
@@ -32,6 +33,15 @@ function App() {
   } = useStore()
 
   const [pendingView, setPendingView] = useState<'skills' | 'trees' | 'board' | null>(null)
+  const [terminalKey, setTerminalKey] = useState(0)
+  const [confirmReset, setConfirmReset] = useState(false)
+
+  async function handleResetTerminal() {
+    setTerminalAlive(false)
+    await StopTerminal()
+    setTerminalKey((k) => k + 1) // unmounts + remounts Terminal, triggering fresh StartTerminal
+    setConfirmReset(false)
+  }
 
   function requestView(v: 'skills' | 'trees' | 'board') {
     if (v === view) return
@@ -46,12 +56,13 @@ function App() {
 
   async function loadAll() {
     try {
-      const [global, project, flows] = await Promise.all([
-        GetGlobalSkills(), GetProjectSkills(), GetFlows(),
+      const [global, project, library, flows] = await Promise.all([
+        GetGlobalSkills(), GetProjectSkills(), GetLibrarySkills(), GetFlows(),
       ])
       const g = (global ?? []).map((s) => ({ ...s, scope: 'global' as const }))
       const p = (project ?? []).map((s) => ({ ...s, scope: 'project' as const }))
-      setSkills([...g, ...p])
+      const l = (library ?? []).map((s) => ({ ...s, scope: 'library' as const }))
+      setSkills([...g, ...p, ...l])
       setFlows((flows ?? []) as any)
       // Kick off description generation for any flows missing one
       GenerateFlowDescriptions()
@@ -89,14 +100,21 @@ function App() {
       const dir = await OpenProjectDirectory()
       if (dir) {
         setProjectDir(dir)
-        const [global, project] = await Promise.all([GetGlobalSkills(), GetProjectSkills()])
+        const [global, project, library] = await Promise.all([GetGlobalSkills(), GetProjectSkills(), GetLibrarySkills()])
         const g = (global ?? []).map((s) => ({ ...s, scope: 'global' as const }))
         const p = (project ?? []).map((s) => ({ ...s, scope: 'project' as const }))
-        setSkills([...g, ...p])
+        const l = (library ?? []).map((s) => ({ ...s, scope: 'library' as const }))
+        setSkills([...g, ...p, ...l])
       }
     } catch (e: unknown) {
       setError(String(e))
     }
+  }
+
+  async function handleClearProject() {
+    await ClearProjectDir()
+    setProjectDir('')
+    loadAll()
   }
 
   async function handleNewFlow() {
@@ -152,7 +170,12 @@ function App() {
 
         <div className="titlebar-project">
           {projectBasename && (
-            <span className="project-path" title={projectDir}>{projectBasename}</span>
+            <div className="titlebar-project-tag">
+              <span className="project-path" title={projectDir}>{projectBasename}</span>
+              <button className="btn-ghost titlebar-clear-project" onClick={handleClearProject} title="Unset project">
+                <X size={12} />
+              </button>
+            </div>
           )}
           <button className="btn-ghost" onClick={handleOpenProject} title="Open project directory">
             <FolderOpen size={14} />
@@ -200,19 +223,40 @@ function App() {
                 {terminalAlive && <span className="terminal-alive-dot" />}
                 <div className="terminal-header-gap" />
                 <button
+                  className="btn-ghost terminal-reset"
+                  onClick={() => setConfirmReset(true)}
+                  title="Reset terminal"
+                >
+                  <RotateCcw size={15} />
+                </button>
+                <button
                   className="btn-ghost terminal-close"
                   onClick={() => setTerminalOpen(false)}
                 >
-                  <ChevronDown size={13} />
+                  <ChevronDown size={15} />
                 </button>
               </div>
               <div className="terminal-body">
-                <Terminal onExit={() => setTerminalAlive(false)} />
+                <Terminal key={terminalKey} onExit={() => setTerminalAlive(false)} />
               </div>
             </div>
           </>
         )}
       </div>
+
+      {/* Terminal reset confirmation */}
+      {confirmReset && (
+        <div className="modal-overlay" onClick={() => setConfirmReset(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Reset terminal?</h3>
+            <p>This will end the current Claude session and start a fresh one.</p>
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={() => setConfirmReset(false)}>Cancel</button>
+              <button className="btn-primary" onClick={handleResetTerminal}>Reset</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Unsaved changes guard — view navigation */}
       {pendingView && (

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, useEffect, useMemo } from 'react'
+import { useCallback, useRef, useState, useEffect, useMemo, createContext } from 'react'
 import {
   ReactFlow,
   Background,
@@ -25,6 +25,7 @@ import '@xyflow/react/dist/style.css'
 import { useStore } from '../store'
 import { Flow, FlowNode, FlowEdge } from '../types'
 import { SkillNode } from './SkillNode'
+import { AnnotationTextNode, AnnotationStickyNode, AnnotationDrawingNode } from './AnnotationNodes'
 import {
   SaveFlow,
   DeleteFlow,
@@ -34,12 +35,130 @@ import {
 } from '../../wailsjs/go/main/App'
 import {
   Plus, Save, Trash2, Download, ChevronDown, Check, X, Copy, AlertTriangle,
+  Type, StickyNote, Pen,
 } from 'lucide-react'
 import { ProjectScopeInfo } from './ProjectScopeInfo'
 import { GithubButton } from './GithubButton'
 import './NodeBoard.css'
 
-const nodeTypes = { skill: SkillNode }
+const nodeTypes = {
+  skill: SkillNode,
+  'annotation-text':    AnnotationTextNode,
+  'annotation-sticky':  AnnotationStickyNode,
+  'annotation-drawing': AnnotationDrawingNode,
+}
+
+export const BadgeContext = createContext<Map<string, string>>(new Map())
+
+function computeNodeBadges(nodes: Node[], edges: Edge[]): Map<string, string> {
+  const connectedIds = new Set<string>()
+  for (const e of edges) { connectedIds.add(e.source); connectedIds.add(e.target) }
+  if (connectedIds.size === 0) return new Map()
+
+  const nodeLabel = (id: string) => {
+    const n = nodes.find((nd) => nd.id === id)
+    return ((n?.data as Record<string, unknown>)?.label as string) || id
+  }
+
+  // Undirected adjacency for component detection
+  const undirAdj = new Map<string, Set<string>>()
+  for (const n of nodes) undirAdj.set(n.id, new Set())
+  for (const e of edges) {
+    undirAdj.get(e.source)?.add(e.target)
+    undirAdj.get(e.target)?.add(e.source)
+  }
+
+  // Find connected components
+  const compVisited = new Set<string>()
+  const components: string[][] = []
+  for (const id of connectedIds) {
+    if (compVisited.has(id)) continue
+    const component: string[] = []
+    const queue = [id]
+    while (queue.length) {
+      const cur = queue.shift()!
+      if (compVisited.has(cur)) continue
+      compVisited.add(cur); component.push(cur)
+      for (const nb of undirAdj.get(cur) ?? []) if (!compVisited.has(nb)) queue.push(nb)
+    }
+    components.push(component)
+  }
+
+  const result = new Map<string, string>()
+
+  for (const component of components) {
+    const compSet = new Set(component)
+
+    // Directed adjacency + in-degree
+    const dirAdj = new Map<string, string[]>()
+    const inDegree = new Map<string, number>()
+    for (const id of component) { dirAdj.set(id, []); inDegree.set(id, 0) }
+    for (const e of edges) {
+      if (!compSet.has(e.source) || !compSet.has(e.target)) continue
+      dirAdj.get(e.source)!.push(e.target)
+      inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1)
+    }
+    // Sort children alphabetically for determinism
+    for (const ch of dirAdj.values()) ch.sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b)))
+
+    // Deepest-level topo sort (mirrors Go implementation)
+    const level = new Map<string, number>()
+    const remaining = new Map(inDegree)
+    const topoQ: string[] = []
+    for (const [id, deg] of inDegree) { if (deg === 0) { topoQ.push(id); level.set(id, 0) } }
+    while (topoQ.length) {
+      const cur = topoQ.shift()!
+      for (const nxt of dirAdj.get(cur) ?? []) {
+        const nl = (level.get(cur) ?? 0) + 1
+        if (nl > (level.get(nxt) ?? 0)) level.set(nxt, nl)
+        remaining.set(nxt, (remaining.get(nxt) ?? 1) - 1)
+        if (remaining.get(nxt) === 0) topoQ.push(nxt)
+      }
+    }
+
+    // DFS from sorted roots: visit each subtree in full before moving to the
+    // next sibling. This means all descendants of branch "a" are stamped before
+    // any descendant of branch "b", giving consistent letters across levels.
+    const roots = component
+      .filter(id => inDegree.get(id) === 0)
+      .sort((a, b) => nodeLabel(a).localeCompare(nodeLabel(b)))
+
+    const dfsOrder = new Map<string, number>() // nodeId → visit index within its level
+    const levelCounter = new Map<number, number>()
+    const dfsVisited = new Set<string>()
+    // Stack is LIFO — push children in reverse so first child is popped first
+    const stack = [...roots].reverse()
+    while (stack.length) {
+      const id = stack.pop()!
+      if (dfsVisited.has(id)) continue
+      dfsVisited.add(id)
+      const lv = level.get(id) ?? 0
+      dfsOrder.set(id, levelCounter.get(lv) ?? 0)
+      levelCounter.set(lv, (levelCounter.get(lv) ?? 0) + 1)
+      const ch = dirAdj.get(id) ?? []
+      for (let i = ch.length - 1; i >= 0; i--) {
+        if (!dfsVisited.has(ch[i])) stack.push(ch[i])
+      }
+    }
+
+    // Group by level, sort by DFS order, assign badges
+    const byLevel = new Map<number, string[]>()
+    for (const [id, lv] of level) {
+      if (!byLevel.has(lv)) byLevel.set(lv, [])
+      byLevel.get(lv)!.push(id)
+    }
+
+    Array.from(byLevel.keys()).sort((a, b) => a - b).forEach((lv, i) => {
+      const ids = byLevel.get(lv)!.sort((a, b) => (dfsOrder.get(a) ?? 0) - (dfsOrder.get(b) ?? 0))
+      const num = i + 1
+      ids.forEach((id, j) => {
+        result.set(id, ids.length === 1 ? String(num) : `${num}${String.fromCharCode(97 + j)}`)
+      })
+    })
+  }
+
+  return result
+}
 
 // Only treat a node change as "dirty" if it's a real structural mutation.
 // - 'select'     → just a click/focus, no data change
@@ -73,6 +192,120 @@ export function NodeBoard({ onRefresh }: Props) {
 
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+
+  const nodeBadges = useMemo(() => computeNodeBadges(nodes, edges), [nodes, edges])
+
+  // Annotation tools
+  const [annotationTool, setAnnotationToolState] = useState<'text' | 'sticky' | 'pencil' | null>(null)
+  const annotationToolRef = useRef<'text' | 'sticky' | 'pencil' | null>(null)
+  function setAnnotationTool(t: typeof annotationTool) {
+    setAnnotationToolState(t)
+    annotationToolRef.current = t
+  }
+
+  // Pencil drawing
+  const pencilRef = useRef<{ screenPts: { x: number; y: number }[] } | null>(null)
+  const [pencilOverlay, setPencilOverlay] = useState<{ x: number; y: number }[] | null>(null)
+
+  // Right-click marquee selection
+  const marqueeAnchor = useRef<{ screenX: number; screenY: number } | null>(null)
+  const marqueeActive = useRef(false)
+  const marqueeBoxRef = useRef<{ x: number; y: number; w: number; h: number } | null>(null)
+  const [marqueeBox, setMarqueeBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+
+  useEffect(() => {
+    function onMouseMove(e: MouseEvent) {
+      // Marquee
+      if (marqueeAnchor.current) {
+        const dx = e.clientX - marqueeAnchor.current.screenX
+        const dy = e.clientY - marqueeAnchor.current.screenY
+        if (!marqueeActive.current && Math.hypot(dx, dy) < 4) return
+        marqueeActive.current = true
+        const box = {
+          x: Math.min(e.clientX, marqueeAnchor.current.screenX),
+          y: Math.min(e.clientY, marqueeAnchor.current.screenY),
+          w: Math.abs(dx),
+          h: Math.abs(dy),
+        }
+        marqueeBoxRef.current = box
+        setMarqueeBox(box)
+      }
+
+      // Pencil
+      if (pencilRef.current) {
+        const pts = pencilRef.current.screenPts
+        const last = pts[pts.length - 1]
+        if (Math.hypot(e.clientX - last.x, e.clientY - last.y) < 3) return
+        pts.push({ x: e.clientX, y: e.clientY })
+        setPencilOverlay([...pts])
+      }
+    }
+
+    function onMouseUp(e: MouseEvent) {
+      // Marquee (right button)
+      if (e.button === 2) {
+        if (marqueeActive.current && rfInstance.current && marqueeBoxRef.current) {
+          const { x, y, w, h } = marqueeBoxRef.current
+          const rf = rfInstance.current
+          const tl = rf.screenToFlowPosition({ x, y })
+          const br = rf.screenToFlowPosition({ x: x + w, y: y + h })
+          setNodes((nds) => nds.map((n) => {
+            const nw = n.width ?? 200
+            const nh = n.height ?? 100
+            const hit = n.position.x < br.x && n.position.x + nw > tl.x &&
+                        n.position.y < br.y && n.position.y + nh > tl.y
+            return { ...n, selected: hit }
+          }))
+        }
+        marqueeAnchor.current = null
+        marqueeActive.current = false
+        marqueeBoxRef.current = null
+        setMarqueeBox(null)
+      }
+
+      // Pencil commit (left button)
+      if (e.button === 0 && pencilRef.current && rfInstance.current) {
+        const pts = pencilRef.current.screenPts
+        if (pts.length > 1) {
+          const rf = rfInstance.current
+          const PAD = 6
+          const flowPts = pts.map((p) => rf.screenToFlowPosition(p))
+          const xs = flowPts.map((p) => p.x)
+          const ys = flowPts.map((p) => p.y)
+          const minX = Math.min(...xs) - PAD
+          const minY = Math.min(...ys) - PAD
+          const maxX = Math.max(...xs) + PAD
+          const maxY = Math.max(...ys) + PAD
+          const relPts = flowPts.map((p) => ({ x: p.x - minX, y: p.y - minY }))
+          const pathD = 'M ' + relPts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ')
+          const annId = `ann-${Date.now()}`
+          setNodes((nds) => [
+            ...nds,
+            {
+              id: annId,
+              type: 'annotation-drawing',
+              position: { x: minX, y: minY },
+              data: { path: pathD, width: maxX - minX, height: maxY - minY },
+              width: maxX - minX,
+              height: maxY - minY,
+              selected: false,
+            },
+          ])
+          setDirty(true)
+        }
+        pencilRef.current = null
+        setPencilOverlay(null)
+      }
+    }
+
+    document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('mouseup', onMouseUp)
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [setNodes])
+
   const [flowName, setFlowName] = useState('')
   const [dirty, setDirtyState] = useState(false)
 
@@ -109,10 +342,11 @@ export function NodeBoard({ onRefresh }: Props) {
 
   // Detect gaps: rogue nodes (no connections) or disconnected subgraphs
   const flowWarning = useMemo(() => {
-    if (nodes.length < 2) return null
+    const skillNodes = nodes.filter((n) => !n.type?.startsWith('annotation-'))
+    if (skillNodes.length < 2) return null
 
     const adj = new Map<string, Set<string>>()
-    for (const n of nodes) adj.set(n.id, new Set())
+    for (const n of skillNodes) adj.set(n.id, new Set())
     for (const e of edges) {
       adj.get(e.source)?.add(e.target)
       adj.get(e.target)?.add(e.source)
@@ -120,7 +354,7 @@ export function NodeBoard({ onRefresh }: Props) {
 
     const visited = new Set<string>()
     let components = 0
-    for (const n of nodes) {
+    for (const n of skillNodes) {
       if (visited.has(n.id)) continue
       components++
       const stack = [n.id]
@@ -134,7 +368,7 @@ export function NodeBoard({ onRefresh }: Props) {
 
     if (components === 1) return null
 
-    const isolated = nodes.filter((n) => adj.get(n.id)!.size === 0)
+    const isolated = skillNodes.filter((n) => adj.get(n.id)!.size === 0)
     const parts: string[] = []
     if (isolated.length)
       parts.push(`${isolated.length} unconnected node${isolated.length > 1 ? 's' : ''}`)
@@ -168,8 +402,8 @@ export function NodeBoard({ onRefresh }: Props) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  function toRFNodes(flowNodes: FlowNode[]): Node[] {
-    return flowNodes.map((n) => ({
+  function toRFNodes(flowNodes: FlowNode[], annotations: Flow['annotations'] = []): Node[] {
+    const skill = flowNodes.map((n) => ({
       id: n.id,
       type: n.type || 'skill',
       position: n.position,
@@ -177,6 +411,15 @@ export function NodeBoard({ onRefresh }: Props) {
       ...(n.width  ? { width:  n.width  } : {}),
       ...(n.height ? { height: n.height } : {}),
     }))
+    const ann = (annotations ?? []).map((a) => ({
+      id: a.id,
+      type: `annotation-${a.type}`,
+      position: a.position,
+      data: a.data,
+      ...(a.width  ? { width:  a.width  } : {}),
+      ...(a.height ? { height: a.height } : {}),
+    }))
+    return [...skill, ...ann]
   }
 
   function toRFEdges(flowEdges: FlowEdge[]): Edge[] {
@@ -195,7 +438,7 @@ export function NodeBoard({ onRefresh }: Props) {
   // Load flow into canvas when selectedFlowId changes
   useEffect(() => {
     if (activeFlow) {
-      setNodes(toRFNodes(activeFlow.nodes))
+      setNodes(toRFNodes(activeFlow.nodes, activeFlow.annotations))
       setEdges(toRFEdges(activeFlow.edges))
       setFlowName(activeFlow.name)
       setDirty(false)
@@ -218,6 +461,8 @@ export function NodeBoard({ onRefresh }: Props) {
       // Reject if adding this edge would create a cycle:
       // check whether params.source is already reachable from params.target
       setEdges((eds) => {
+        if (eds.some((e) => e.target === params.target)) return eds // target already has an input
+
         const reachable = new Set<string>()
         const stack = [params.target!]
         while (stack.length) {
@@ -329,8 +574,13 @@ export function NodeBoard({ onRefresh }: Props) {
   }
 
   function reverseEdge(edgeId: string) {
-    setEdges((eds) =>
-      eds.map((e) => {
+    setEdges((eds) => {
+      const edge = eds.find((e) => e.id === edgeId)
+      if (!edge) return eds
+      // After reversal, edge.source becomes the new target — reject if it already has another input
+      const newTarget = edge.source
+      if (eds.some((e) => e.id !== edgeId && e.target === newTarget)) return eds
+      return eds.map((e) => {
         if (e.id !== edgeId) return e
         return {
           ...e,
@@ -340,7 +590,7 @@ export function NodeBoard({ onRefresh }: Props) {
           targetHandle: e.sourceHandle,
         }
       })
-    )
+    })
     setDirty(true)
     setEdgeMenu(null)
   }
@@ -361,16 +611,26 @@ export function NodeBoard({ onRefresh }: Props) {
     if (!activeFlow) return
     setSaving(true)
     try {
+      const skillNodes = nodes.filter((n) => !n.type?.startsWith('annotation-'))
+      const annNodes   = nodes.filter((n) =>  n.type?.startsWith('annotation-'))
       const updated: Flow = {
         id: activeFlow.id,
         name: flowName || 'New Skilltree',
         description: activeFlow.description ?? '',
         contentHash: activeFlow.contentHash ?? '',
-        nodes: nodes.map((n) => ({
+        nodes: skillNodes.map((n) => ({
           id: n.id,
           type: n.type ?? 'skill',
           position: n.position,
           data: n.data as FlowNode['data'],
+          width: n.width,
+          height: n.height,
+        })),
+        annotations: annNodes.map((n) => ({
+          id: n.id,
+          type: n.type!.replace('annotation-', '') as 'text' | 'sticky' | 'drawing',
+          position: n.position,
+          data: n.data as Record<string, unknown>,
           width: n.width,
           height: n.height,
         })),
@@ -470,9 +730,29 @@ export function NodeBoard({ onRefresh }: Props) {
               }}
             >
               <span className="palette-item-name">{skill.name}</span>
-              <span className={`palette-badge ${skill.scope}`}>{skill.scope === 'global' ? 'G' : 'P'}</span>
+              <span className={`palette-badge ${skill.scope}`}>{skill.scope === 'global' ? 'G' : skill.scope === 'library' ? 'L' : 'P'}</span>
             </div>
           ))}
+        </div>
+        <div className="palette-tools-section">
+          <div className="palette-tools-header">Canvas Tools</div>
+          <div className="palette-tools-list">
+            {([
+              { tool: 'text',   icon: <Type size={13} />,       label: 'Text'   },
+              { tool: 'sticky', icon: <StickyNote size={13} />, label: 'Sticky' },
+              { tool: 'pencil', icon: <Pen size={13} />,        label: 'Pencil' },
+            ] as const).map(({ tool, icon, label }) => (
+              <button
+                key={tool}
+                className={`palette-tool-btn ${annotationTool === tool ? 'active' : ''}`}
+                onClick={() => setAnnotationTool(annotationTool === tool ? null : tool)}
+                title={label}
+              >
+                {icon}
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
         </div>
         <GithubButton />
       </aside>
@@ -565,7 +845,61 @@ export function NodeBoard({ onRefresh }: Props) {
         </div>
 
         {/* React Flow canvas */}
-        <div className="rf-wrapper" ref={reactFlowWrapper}>
+        <div
+          className="rf-wrapper"
+          ref={reactFlowWrapper}
+          style={{ cursor: annotationTool === 'pencil' ? 'crosshair' : annotationTool ? 'cell' : undefined }}
+          onMouseDown={(e) => {
+            const target = e.target as HTMLElement
+            const onNode = target.closest('.react-flow__node') || target.closest('.react-flow__edge')
+
+            // Right-click marquee (pane only)
+            if (e.button === 2 && !onNode) {
+              marqueeAnchor.current = { screenX: e.clientX, screenY: e.clientY }
+              marqueeActive.current = false
+              return
+            }
+
+            // Left-click annotation tool (pane only)
+            if (e.button === 0 && !onNode && rfInstance.current) {
+              const tool = annotationToolRef.current
+              if (tool === 'text' || tool === 'sticky') {
+                const pos = rfInstance.current.screenToFlowPosition({ x: e.clientX, y: e.clientY })
+                const annId = `ann-${Date.now()}`
+                setNodes((nds) => [...nds, {
+                  id: annId,
+                  type: `annotation-${tool}`,
+                  position: { x: pos.x - 60, y: pos.y - 12 },
+                  data: { text: '', editing: true },
+                  selected: false,
+                }])
+                setDirty(true)
+              } else if (tool === 'pencil') {
+                pencilRef.current = { screenPts: [{ x: e.clientX, y: e.clientY }] }
+                setPencilOverlay([{ x: e.clientX, y: e.clientY }])
+              }
+            }
+          }}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          {marqueeBox && (
+            <div
+              className="marquee-box"
+              style={{ left: marqueeBox.x, top: marqueeBox.y, width: marqueeBox.w, height: marqueeBox.h }}
+            />
+          )}
+          {pencilOverlay && pencilOverlay.length > 1 && (
+            <svg className="pencil-overlay" style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', pointerEvents: 'none', zIndex: 1000 }}>
+              <polyline
+                points={pencilOverlay.map((p) => `${p.x},${p.y}`).join(' ')}
+                stroke="var(--text-2)"
+                strokeWidth={2}
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          )}
           {!activeFlow ? (
             <div className="no-flow">
               <p>Create or select a skilltree to start building.</p>
@@ -574,6 +908,7 @@ export function NodeBoard({ onRefresh }: Props) {
               </button>
             </div>
           ) : (
+            <BadgeContext.Provider value={nodeBadges}>
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -599,6 +934,7 @@ export function NodeBoard({ onRefresh }: Props) {
               snapToGrid
               snapGrid={[16, 16]}
               deleteKeyCode={null}
+              panOnDrag={annotationTool === null}
               proOptions={{ hideAttribution: true }}
             >
               <Background
@@ -622,6 +958,7 @@ export function NodeBoard({ onRefresh }: Props) {
                 </Panel>
               )}
             </ReactFlow>
+            </BadgeContext.Provider>
           )}
         </div>
       </div>
@@ -644,15 +981,22 @@ export function NodeBoard({ onRefresh }: Props) {
       )}
 
       {/* Edge context menu */}
-      {edgeMenu && (
-        <EdgeContextMenu
-          x={edgeMenu.x}
-          y={edgeMenu.y}
-          onDelete={() => deleteEdge(edgeMenu.edgeId)}
-          onReverse={() => reverseEdge(edgeMenu.edgeId)}
-          onClose={() => setEdgeMenu(null)}
-        />
-      )}
+      {edgeMenu && (() => {
+        const menuEdge = edges.find((e) => e.id === edgeMenu.edgeId)
+        const canReverse = menuEdge
+          ? !edges.some((e) => e.id !== edgeMenu.edgeId && e.target === menuEdge.source)
+          : false
+        return (
+          <EdgeContextMenu
+            x={edgeMenu.x}
+            y={edgeMenu.y}
+            onDelete={() => deleteEdge(edgeMenu.edgeId)}
+            onReverse={() => reverseEdge(edgeMenu.edgeId)}
+            onClose={() => setEdgeMenu(null)}
+            canReverse={canReverse}
+          />
+        )
+      })()}
 
       {/* Node context menu */}
       {nodeMenu && (
@@ -889,12 +1233,13 @@ function NodeContextMenu({
 }
 
 function EdgeContextMenu({
-  x, y, onDelete, onReverse, onClose,
+  x, y, onDelete, onReverse, onClose, canReverse,
 }: {
   x: number; y: number
   onDelete: () => void
   onReverse: () => void
   onClose: () => void
+  canReverse: boolean
 }) {
   // Close on any outside click
   useEffect(() => {
@@ -909,7 +1254,7 @@ function EdgeContextMenu({
       style={{ left: x, top: y }}
       onClick={(e) => e.stopPropagation()}
     >
-      <button className="edge-menu-item" onClick={onReverse}>
+      <button className="edge-menu-item" onClick={onReverse} disabled={!canReverse} title={!canReverse ? 'Target node already has an input' : undefined}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M7 16V4m0 0L3 8m4-4l4 4"/>
           <path d="M17 8v12m0 0l4-4m-4 4l-4-4"/>

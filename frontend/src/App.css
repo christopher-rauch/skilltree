@@ -93,6 +93,7 @@
   cursor: pointer;
 }
 
+
 .project-path {
   max-width: 200px;
   overflow: hidden;
@@ -166,13 +167,16 @@
   flex: 1;
 }
 
+.terminal-reset,
 .terminal-close {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
   color: var(--text-3);
+}
+
+.terminal-reset:hover {
+  color: var(--amber);
 }
 
 .terminal-body {
@@ -205,6 +209,22 @@
   background: var(--primary-dim);
 }
 
+.btn-primary.scope-project {
+  background: var(--amber);
+}
+
+.btn-primary.scope-project:hover:not(:disabled) {
+  background: #d97706;
+}
+
+.btn-primary.scope-library {
+  background: #8b5cf6;
+}
+
+.btn-primary.scope-library:hover:not(:disabled) {
+  background: #7c3aed;
+}
+
 .btn-secondary {
   background: var(--surface-3);
   color: var(--text);
@@ -226,6 +246,30 @@
 .btn-ghost:hover:not(:disabled) {
   background: var(--surface-3);
   color: var(--text);
+}
+
+.btn-ghost.terminal-reset,
+.btn-ghost.terminal-close {
+  padding: 0;
+  width: 26px;
+  height: 26px;
+}
+
+.titlebar-project-tag {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.btn-ghost.titlebar-clear-project {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--text-3);
 }
 
 .btn-danger {

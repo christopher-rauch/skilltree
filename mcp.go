@@ -286,11 +286,13 @@ func (s *mcpServer) callTool(name string, args map[string]any) (string, error) {
 
 func (s *mcpServer) toolList() []map[string]any {
 	tool := func(name, desc string, props map[string]any, required []string) map[string]any {
+		schema := map[string]any{"type": "object", "properties": props}
+		if len(required) > 0 {
+			schema["required"] = required // omit rather than null when empty
+		}
 		return map[string]any{
 			"name": name, "description": desc,
-			"inputSchema": map[string]any{
-				"type": "object", "properties": props, "required": required,
-			},
+			"inputSchema": schema,
 		}
 	}
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }

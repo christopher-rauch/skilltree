@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { Skill, SkillScope } from '../types'
-import { SaveSkill } from '../../wailsjs/go/main/App'
+import { SaveSkill, DeleteSkill } from '../../wailsjs/go/main/App'
 import { useStore } from '../store'
-import { X, Globe, Folder } from 'lucide-react'
+import { X, Globe, Folder, BookOpen } from 'lucide-react'
 import { ProjectScopeInfo } from './ProjectScopeInfo'
 import './SkillEditor.css'
 
@@ -25,6 +25,7 @@ export function SkillEditor({ skill, defaultScope, onClose, onSave }: Props) {
   const [scope, setScope] = useState<SkillScope>(skill?.scope ?? defaultScope)
   const [saving, setSaving] = useState(false)
   const [nameError, setNameError] = useState('')
+  const [scopeChangePrompt, setScopeChangePrompt] = useState(false)
 
   const nameRef = useRef<HTMLInputElement>(null)
   useEffect(() => { nameRef.current?.focus() }, [])
@@ -39,10 +40,23 @@ export function SkillEditor({ skill, defaultScope, onClose, onSave }: Props) {
     const err = validateName(name)
     if (err) { setNameError(err); return }
 
+    if (!isNew && skill?.scope !== scope) {
+      setScopeChangePrompt(true)
+      return
+    }
+
+    await commitSave(false)
+  }
+
+  async function commitSave(removeFromSource: boolean) {
     setSaving(true)
+    setScopeChangePrompt(false)
     try {
       const saved: Skill = { name, description, argumentHint, allowedTools, body, scope }
       await SaveSkill(saved, skill?.name ?? '')
+      if (removeFromSource && skill) {
+        await DeleteSkill(skill.name, skill.scope)
+      }
       await onSave(saved)
     } catch (e: unknown) {
       setError(String(e))
@@ -75,17 +89,23 @@ export function SkillEditor({ skill, defaultScope, onClose, onSave }: Props) {
             <label>Scope</label>
             <div className="scope-selector">
               <button
-                className={`scope-opt ${scope === 'global' ? 'active' : ''}`}
+                className={`scope-opt scope-global ${scope === 'global' ? 'active' : ''}`}
                 onClick={() => setScope('global')}
               >
                 <Globe size={12} /> Global (~/.claude/skills)
               </button>
               <button
-                className={`scope-opt ${scope === 'project' ? 'active' : ''}`}
+                className={`scope-opt scope-project ${scope === 'project' ? 'active' : ''}`}
                 onClick={() => setScope('project')}
                 disabled={!projectDir}
               >
                 <Folder size={12} /> Project (.claude/skills)
+              </button>
+              <button
+                className={`scope-opt scope-library ${scope === 'library' ? 'active' : ''}`}
+                onClick={() => setScope('library')}
+              >
+                <BookOpen size={12} /> Library (inlined on export)
               </button>
             </div>
             <ProjectScopeInfo projectDir={projectDir} />
@@ -164,6 +184,23 @@ export function SkillEditor({ skill, defaultScope, onClose, onSave }: Props) {
           </div>
         </div>
       </div>
+
+      {scopeChangePrompt && (
+        <div className="modal-overlay" onClick={() => setScopeChangePrompt(false)}>
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <h3>Scope changed</h3>
+            <p>
+              Move <strong>{skill?.name}</strong> from <strong>{skill?.scope}</strong> to <strong>{scope}</strong>,
+              or keep a copy in both?
+            </p>
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={() => setScopeChangePrompt(false)}>Cancel</button>
+              <button className="btn-secondary" onClick={() => commitSave(false)}>Duplicate</button>
+              <button className="btn-primary" onClick={() => commitSave(true)}>Move</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

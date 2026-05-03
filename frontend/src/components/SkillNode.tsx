@@ -1,13 +1,17 @@
+import { useContext } from 'react'
 import { Handle, Position, NodeResizeControl, ResizeControlVariant } from '@xyflow/react'
 import { FlowNodeData } from '../types'
+import { BadgeContext } from './NodeBoard'
 import './SkillNode.css'
 
 interface Props {
+  id: string
   data: FlowNodeData
   selected: boolean
 }
 
-export function SkillNode({ data, selected }: Props) {
+export function SkillNode({ id, data, selected }: Props) {
+  const badge = useContext(BadgeContext).get(id)
   const handleStyle = {
     width: 10,
     height: 10,
@@ -18,6 +22,7 @@ export function SkillNode({ data, selected }: Props) {
 
   return (
     <>
+      {badge && <div className="node-badge">{badge}</div>}
       {/* Handles sit outside the clipped inner div so they're never cut off */}
       <Handle type="target" position={Position.Top} style={handleStyle} />
       <Handle type="source" position={Position.Bottom} style={handleStyle} />

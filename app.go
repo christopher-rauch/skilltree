@@ -35,8 +35,23 @@ func (a *App) startup(ctx context.Context) {
 	port, err := startMCPServer(a)
 	if err == nil {
 		a.mcpPort = port
+		// Write port file so the permanent MCP proxy can find the server.
+		home, _ := os.UserHomeDir()
+		_ = os.WriteFile(
+			filepath.Join(home, ".claude", "skilltree-mcp-port"),
+			[]byte(fmt.Sprintf("%d", port)),
+			0644,
+		)
 	}
 }
+
+func (a *App) shutdown(_ context.Context) {
+	a.StopTerminal()
+	// Remove port file so the proxy fails gracefully when the app isn't running.
+	home, _ := os.UserHomeDir()
+	_ = os.Remove(filepath.Join(home, ".claude", "skilltree-mcp-port"))
+}
+
 
 func (a *App) SetBoardDirty(dirty bool) {
 	a.boardDirty = dirty
@@ -105,13 +120,23 @@ type FlowEdge struct {
 	Animated     bool   `json:"animated"`
 }
 
+type FlowAnnotation struct {
+	ID       string         `json:"id"`
+	Type     string         `json:"type"` // "text" | "sticky" | "drawing"
+	Position XYPosition     `json:"position"`
+	Data     map[string]any `json:"data"`
+	Width    float64        `json:"width,omitempty"`
+	Height   float64        `json:"height,omitempty"`
+}
+
 type Flow struct {
-	ID          string     `json:"id"`
-	Name        string     `json:"name"`
-	Description string     `json:"description"`
-	ContentHash string     `json:"contentHash"`
-	Nodes       []FlowNode `json:"nodes"`
-	Edges       []FlowEdge `json:"edges"`
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	ContentHash string           `json:"contentHash"`
+	Nodes       []FlowNode       `json:"nodes"`
+	Edges       []FlowEdge       `json:"edges"`
+	Annotations []FlowAnnotation `json:"annotations,omitempty"`
 }
 
 // flowContentHash hashes skill names + edge topology (ignores node positions).
@@ -147,6 +172,11 @@ func flowContentHash(flow Flow) string {
 func globalSkillsDir() string {
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".claude", "skills")
+}
+
+func librarySkillsDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "skilltree", "skills")
 }
 
 func (a *App) projectSkillsDir() string {
@@ -270,6 +300,10 @@ func (a *App) GetProjectDir() string {
 	return a.projectDir
 }
 
+func (a *App) ClearProjectDir() {
+	a.projectDir = ""
+}
+
 func (a *App) OpenProjectDirectory() (string, error) {
 	dir, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Select Project Directory",
@@ -285,9 +319,12 @@ func (a *App) OpenProjectDirectory() (string, error) {
 
 func (a *App) SaveSkill(skill Skill, originalName string) error {
 	var dir string
-	if skill.Scope == "global" {
+	switch skill.Scope {
+	case "global":
 		dir = globalSkillsDir()
-	} else {
+	case "library":
+		dir = librarySkillsDir()
+	default:
 		dir = a.projectSkillsDir()
 		if dir == "" {
 			return fmt.Errorf("no project directory set — open a project first")
@@ -304,15 +341,22 @@ func (a *App) SaveSkill(skill Skill, originalName string) error {
 
 func (a *App) DeleteSkill(name string, scope string) error {
 	var dir string
-	if scope == "global" {
+	switch scope {
+	case "global":
 		dir = globalSkillsDir()
-	} else {
+	case "library":
+		dir = librarySkillsDir()
+	default:
 		dir = a.projectSkillsDir()
 		if dir == "" {
 			return fmt.Errorf("no project directory set")
 		}
 	}
 	return os.RemoveAll(filepath.Join(dir, name))
+}
+
+func (a *App) GetLibrarySkills() ([]Skill, error) {
+	return loadSkillsFromDir(librarySkillsDir(), "library")
 }
 
 // --- Exported flow methods ---
@@ -458,6 +502,14 @@ func generateDescription(flow Flow) (string, error) {
 // Nodes at the same topological level (all parents completed) are emitted as
 // a concurrent phase; nodes that must wait for prior work run sequentially.
 func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error {
+	// Build a lookup of library skills so their bodies can be inlined on export.
+	libraryIndex := map[string]Skill{}
+	if libSkills, err := a.GetLibrarySkills(); err == nil {
+		for _, s := range libSkills {
+			libraryIndex[s.Name] = s
+		}
+	}
+
 	nodeMap := make(map[string]FlowNode)
 	inDegree := make(map[string]int)
 	adj := make(map[string][]string)   // source → targets
@@ -580,7 +632,12 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 			if desc != "" {
 				fmt.Fprintf(&sb, "> %s\n\n", desc)
 			}
-			fmt.Fprintf(&sb, "Invoke `/%s`.\n\n", sName)
+			if libSkill, ok := libraryIndex[sName]; ok {
+				sb.WriteString(strings.TrimSpace(libSkill.Body))
+				sb.WriteString("\n\n")
+			} else {
+				fmt.Fprintf(&sb, "Invoke `/%s`.\n\n", sName)
+			}
 		}
 
 		phaseNum++

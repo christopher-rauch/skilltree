@@ -48,6 +48,7 @@ func main() {
 			Assets: assets,
 		},
 		OnStartup:     app.startup,
+		OnShutdown:    app.shutdown,
 		OnBeforeClose: app.beforeClose,
 		Bind:          []any{app},
 		Mac: &mac.Options{

@@ -2,13 +2,13 @@ package main
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/creack/pty"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -62,53 +62,67 @@ func (a *App) StartTerminal(cols, rows uint16) error {
 		return fmt.Errorf("claude CLI not found — install it with: npm i -g @anthropic-ai/claude-code")
 	}
 
-	// Temp session directory
+	home, _ := os.UserHomeDir()
+	claudeDir := filepath.Join(home, ".claude")
+
+	// Temp session directory (just holds CLAUDE.md; proxy lives elsewhere now)
 	dir, err := os.MkdirTemp("", "skilltree-session-*")
 	if err != nil {
 		return err
 	}
-
 	if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte(claudeMD()), 0644); err != nil {
 		os.RemoveAll(dir)
 		return err
 	}
 
-	// Write a tiny Node.js proxy that bridges Claude's stdio MCP to our HTTP server.
-	// Using Node avoids any macOS binary-signing issues with spawning the Wails .app.
 	nodePath, err := shellWhich("node")
 	if err != nil {
 		os.RemoveAll(dir)
 		return fmt.Errorf("node not found — required for MCP integration")
 	}
-	proxyPath := filepath.Join(dir, "mcp-proxy.js")
-	if err := os.WriteFile(proxyPath, []byte(mcpProxyJS(a.mcpPort)), 0644); err != nil {
+
+	// Write port to a stable file that the proxy reads at request time.
+	// This survives app restarts without needing to re-register.
+	portFile := filepath.Join(claudeDir, "skilltree-mcp-port")
+	if err := os.WriteFile(portFile, []byte(fmt.Sprintf("%d", a.mcpPort)), 0644); err != nil {
 		os.RemoveAll(dir)
 		return err
 	}
 
-	// Project-scoped settings so Claude picks up our MCP server
-	claudeDir := filepath.Join(dir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+	// Write the proxy to a stable, permanent path in ~/.claude/ so the daemon
+	// can always find it. It reads the port file dynamically on every request,
+	// so no re-registration is needed if the app restarts with a new port.
+	proxyPath := filepath.Join(claudeDir, "skilltree-mcp-proxy.js")
+	if err := os.WriteFile(proxyPath, []byte(mcpProxyJS(portFile)), 0644); err != nil {
 		os.RemoveAll(dir)
 		return err
 	}
-	settings := map[string]any{
-		"mcpServers": map[string]any{
-			"skilltree-gui": map[string]any{
-				"command": nodePath,
-				"args":    []string{proxyPath},
-			},
-		},
+
+	// Register once. If already registered with the right path, this is a no-op.
+	if err := a.registerMCPServer(claudePath, nodePath, proxyPath); err != nil {
+		runtime.EventsEmit(a.ctx, "terminal:output",
+			base64.StdEncoding.EncodeToString([]byte("\r\n\x1b[33m[Skilltree] Warning: could not register MCP server: "+err.Error()+"]\r\n")))
 	}
-	settingsJSON, _ := json.MarshalIndent(settings, "", "  ")
-	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), settingsJSON, 0644); err != nil {
-		os.RemoveAll(dir)
-		return err
+
+	// Brief pause so the daemon finishes connecting to the proxy before
+	// Claude starts its session and loads the tool list.
+	time.Sleep(1500 * time.Millisecond)
+
+	// Resolve the full user PATH via a login shell so Claude's session has
+	// access to all the same binaries as a regular terminal (e.g. ~/.local/bin).
+	fullPath := os.Getenv("PATH")
+	if out, err := exec.Command(os.Getenv("SHELL"), "-l", "-c", "echo $PATH").Output(); err == nil {
+		if p := strings.TrimSpace(string(out)); p != "" {
+			fullPath = p
+		}
 	}
 
 	cmd := exec.Command(claudePath)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = append(os.Environ(),
+		"TERM=xterm-256color",
+		"PATH="+fullPath,
+	)
 
 	if cols == 0 {
 		cols = 220
@@ -169,6 +183,27 @@ func (a *App) StopTerminal() {
 		a.term.dir = ""
 	}
 	a.term.running = false
+	deregisterMCPServer()
+}
+
+const mcpServerKey = "skilltree-gui"
+
+func (a *App) registerMCPServer(claudePath, nodePath, proxyPath string) error {
+	// Remove stale entry silently, then register fresh.
+	exec.Command(claudePath, "mcp", "remove", "-s", "user", mcpServerKey).Run() //nolint
+	cmd := exec.Command(claudePath, "mcp", "add", "-s", "user", mcpServerKey, "--", nodePath, proxyPath)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%w: %s", err, string(out))
+	}
+	return nil
+}
+
+func deregisterMCPServer() {
+	claudePath, err := shellWhich("claude")
+	if err != nil {
+		return
+	}
+	exec.Command(claudePath, "mcp", "remove", "-s", "user", mcpServerKey).Run() //nolint
 }
 
 func (a *App) TerminalInput(dataB64 string) error {
@@ -226,17 +261,23 @@ func claudeMD() string {
 		"When the user asks you to perform GUI actions, call the MCP tool directly.\n"
 }
 
-func mcpProxyJS(port int) string {
-	return fmt.Sprintf(`// Skilltree MCP stdio proxy
-// Bridges Claude Code's stdio MCP transport to the Skilltree HTTP server.
+// mcpProxyJS generates a permanent proxy script that reads the port from a
+// file at runtime — so no re-registration is needed when the app restarts
+// and gets a new random port.
+func mcpProxyJS(portFile string) string {
+	return fmt.Sprintf(`// Skilltree MCP stdio proxy — reads port dynamically from file.
 'use strict';
 const http = require('http');
+const fs   = require('fs');
 
-const PORT = %d;
+const PORT_FILE = %q;
+function getPort() {
+  try { return parseInt(fs.readFileSync(PORT_FILE, 'utf8').trim(), 10); }
+  catch { return 0; }
+}
+
 let buf = '';
-
 process.stdin.setEncoding('utf8');
-
 process.stdin.on('data', (chunk) => {
   buf += chunk;
   let nl;
@@ -246,55 +287,40 @@ process.stdin.on('data', (chunk) => {
     if (line) dispatch(line);
   }
 });
-
-// Keep alive until stdin closes
 process.stdin.on('end', () => process.exit(0));
+process.on('uncaughtException', (e) => process.stderr.write('[skilltree-mcp] ' + e.message + '\n'));
 
-// Surface unhandled rejections as stderr noise rather than crashing
-process.on('uncaughtException', (e) => process.stderr.write('[mcp-proxy] ' + e.message + '\n'));
-
-function send(obj) {
-  process.stdout.write(JSON.stringify(obj) + '\n');
-}
+function send(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
 
 function dispatch(line) {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }
 
+  const port = getPort();
+  if (!port) {
+    if (msg.id != null) send({ jsonrpc: '2.0', id: msg.id,
+      error: { code: -32000, message: 'Skilltree not running (port file missing)' } });
+    return;
+  }
+
   const body = Buffer.from(line, 'utf8');
-
-  const options = {
-    hostname: '127.0.0.1',
-    port: PORT,
-    path: '/message-sync',
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Content-Length': body.length,
-    },
-  };
-
-  const req = http.request(options, (res) => {
-    const chunks = [];
-    res.on('data', (c) => chunks.push(c));
-    res.on('end', () => {
-      const text = Buffer.concat(chunks).toString().trim();
-      if (text) process.stdout.write(text + '\n');
-    });
-  });
-
-  req.on('error', (err) => {
-    // Return a proper JSON-RPC error so Claude doesn't hang waiting
-    if (msg.id !== undefined && msg.id !== null) {
-      send({
-        jsonrpc: '2.0',
-        id: msg.id,
-        error: { code: -32000, message: 'Skilltree app not reachable: ' + err.message },
+  const req = http.request(
+    { hostname: '127.0.0.1', port, path: '/message-sync', method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': body.length } },
+    (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString().trim();
+        if (text) process.stdout.write(text + '\n');
       });
     }
+  );
+  req.on('error', (err) => {
+    if (msg.id != null) send({ jsonrpc: '2.0', id: msg.id,
+      error: { code: -32000, message: 'Skilltree unreachable: ' + err.message } });
   });
-
   req.end(body);
 }
-`, port)
+`, portFile)
 }

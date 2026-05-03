@@ -4,7 +4,7 @@ export interface Skill {
   argumentHint: string
   allowedTools: string
   body: string
-  scope: 'global' | 'project'
+  scope: 'global' | 'project' | 'library'
 }
 
 export interface FlowNodeData {
@@ -14,6 +14,15 @@ export interface FlowNodeData {
   [key: string]: unknown
 }
 
+export interface FlowAnnotation {
+  id: string
+  type: 'text' | 'sticky' | 'drawing'
+  position: { x: number; y: number }
+  data: Record<string, unknown>
+  width?: number
+  height?: number
+}
+
 export interface Flow {
   id: string
   name: string
@@ -21,6 +30,7 @@ export interface Flow {
   contentHash: string
   nodes: FlowNode[]
   edges: FlowEdge[]
+  annotations?: FlowAnnotation[]
 }
 
 export interface FlowNode {
@@ -42,4 +52,4 @@ export interface FlowEdge {
 }
 
 export type View = 'skills' | 'board' | 'trees'
-export type SkillScope = 'global' | 'project'
+export type SkillScope = 'global' | 'project' | 'library'

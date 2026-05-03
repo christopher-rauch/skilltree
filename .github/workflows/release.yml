@@ -15,10 +15,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-13          # Intel
+          - os: macos-14          # Cross-compile Intel from ARM runner (Xcode clang supports -arch x86_64)
             platform: darwin/amd64
             artifact: Skilltree-macOS-Intel.zip
-          - os: macos-14          # Apple Silicon
+          - os: macos-14          # Apple Silicon (native)
             platform: darwin/arm64
             artifact: Skilltree-macOS-AppleSilicon.zip
           - os: windows-latest

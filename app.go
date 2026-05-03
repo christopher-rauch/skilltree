@@ -46,6 +46,7 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.settings = loadSettings()
+	a.ensureSystemSkills()
 	port, err := startMCPServer(a)
 	if err == nil {
 		a.mcpPort = port
@@ -101,7 +102,8 @@ type Skill struct {
 	ArgumentHint string `json:"argumentHint"`
 	AllowedTools string `json:"allowedTools"`
 	Body         string `json:"body"`
-	Scope        string `json:"scope"` // "global" | "project"
+	Scope        string `json:"scope"` // "global" | "project" | "library"
+	System       bool   `json:"system,omitempty"`
 }
 
 type skillFrontmatter struct {
@@ -109,6 +111,7 @@ type skillFrontmatter struct {
 	Description  string      `yaml:"description"`
 	ArgumentHint interface{} `yaml:"argument-hint,omitempty"`
 	AllowedTools interface{} `yaml:"allowed-tools,omitempty"`
+	System       bool        `yaml:"system,omitempty"`
 }
 
 // yamlFieldToString coerces a YAML value to a string. Unquoted bracket
@@ -269,6 +272,7 @@ func parseSkillFile(path string, scope string) (Skill, error) {
 		AllowedTools: yamlFieldToString(fm.AllowedTools),
 		Body:         body,
 		Scope:        scope,
+		System:       fm.System,
 	}, nil
 }
 

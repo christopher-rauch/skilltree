@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useStore } from '../store'
 import { Skill, SkillScope } from '../types'
 import { SkillEditor } from './SkillEditor'
-import { Plus, Trash2, Edit2, Globe, Folder, BookOpen, ChevronRight } from 'lucide-react'
+import { Plus, Trash2, Edit2, Globe, Folder, BookOpen, ChevronRight, Lock } from 'lucide-react'
 import './SkillManager.css'
 import { DeleteSkill } from '../../wailsjs/go/main/App'
 import { GithubButton } from './GithubButton'
@@ -126,20 +126,28 @@ export function SkillManager({ onRefresh }: Props) {
                   )}
                 </div>
                 <div className="skill-item-actions">
-                  <button
-                    className="skill-icon-btn"
-                    title="Edit"
-                    onClick={(e) => { e.stopPropagation(); skill.scope === 'project' ? setProjectPrompt({ action: 'edit', skill }) : setEditing(skill) }}
-                  >
-                    <Edit2 size={12} />
-                  </button>
-                  <button
-                    className="skill-icon-btn danger"
-                    title="Delete"
-                    onClick={(e) => { e.stopPropagation(); setConfirmDelete(skill) }}
-                  >
-                    <Trash2 size={12} />
-                  </button>
+                  {skill.system ? (
+                    <span className="skill-system-badge" title="System skill — read only">
+                      <Lock size={11} />
+                    </span>
+                  ) : (
+                    <>
+                      <button
+                        className="skill-icon-btn"
+                        title="Edit"
+                        onClick={(e) => { e.stopPropagation(); skill.scope === 'project' ? setProjectPrompt({ action: 'edit', skill }) : setEditing(skill) }}
+                      >
+                        <Edit2 size={12} />
+                      </button>
+                      <button
+                        className="skill-icon-btn danger"
+                        title="Delete"
+                        onClick={(e) => { e.stopPropagation(); setConfirmDelete(skill) }}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </>
+                  )}
                 </div>
                 <ChevronRight size={12} className="skill-item-chevron" />
               </div>
@@ -152,7 +160,7 @@ export function SkillManager({ onRefresh }: Props) {
       {/* Detail panel */}
       <div className="skill-detail">
         {displaySkill ? (
-          <SkillDetail skill={displaySkill} onEdit={() => displaySkill.scope === 'project' ? setProjectPrompt({ action: 'edit', skill: displaySkill }) : setEditing(displaySkill)} />
+          <SkillDetail skill={displaySkill} onEdit={displaySkill.system ? undefined : () => displaySkill.scope === 'project' ? setProjectPrompt({ action: 'edit', skill: displaySkill }) : setEditing(displaySkill)} />
         ) : (
           <div className="empty-state">
             <Edit2 size={32} />
@@ -221,19 +229,22 @@ export function SkillManager({ onRefresh }: Props) {
   )
 }
 
-function SkillDetail({ skill, onEdit }: { skill: Skill; onEdit: () => void }) {
+function SkillDetail({ skill, onEdit }: { skill: Skill; onEdit?: () => void }) {
   return (
     <div className="skill-detail-content">
       <div className="skill-detail-header">
         <div>
-          <h2 className="skill-detail-name">{skill.name}</h2>
+          <h2 className="skill-detail-name">
+            {skill.name}
+            {skill.system && <span className="skill-system-badge-inline"><Lock size={11} /> system</span>}
+          </h2>
           {skill.description && (
             <p className="skill-detail-desc">{skill.description}</p>
           )}
         </div>
-        <button className="btn-secondary btn-sm" onClick={onEdit}>
+        {onEdit && <button className="btn-secondary btn-sm" onClick={onEdit}>
           <Edit2 size={13} /> Edit
-        </button>
+        </button>}
       </div>
 
       {(skill.argumentHint || skill.allowedTools) && (

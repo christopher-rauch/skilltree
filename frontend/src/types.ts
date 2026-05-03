@@ -5,6 +5,7 @@ export interface Skill {
   allowedTools: string
   body: string
   scope: 'global' | 'project' | 'library'
+  system?: boolean
 }
 
 export interface FlowNodeData {

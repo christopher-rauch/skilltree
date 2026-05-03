@@ -315,6 +315,9 @@ export function NodeBoard({ onRefresh }: Props) {
     setDirty(true)
   }
 
+  // Clipboard for copy/paste
+  const clipboardRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null)
+
   // Keep stable refs to undo/redo for the keyboard handler.
   const undoRef = useRef(undo)
   const redoRef = useRef(redo)
@@ -534,11 +537,46 @@ export function NodeBoard({ onRefresh }: Props) {
       const t = e.target as HTMLElement
       const inText = t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable
 
-      // Undo / redo / save (Cmd/Ctrl+Z, Cmd/Ctrl+Shift+Z, Cmd/Ctrl+S)
+      // Undo / redo / save / copy / paste (Cmd/Ctrl+Z/S/C/V)
       if ((e.metaKey || e.ctrlKey) && !inText) {
         if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undoRef.current(); return }
         if (e.key === 'z' &&  e.shiftKey) { e.preventDefault(); redoRef.current(); return }
         if (e.key === 's') { e.preventDefault(); handleSaveRef.current(); return }
+        if (e.key === 'c') {
+          const selected = nodesRef.current.filter((n) => n.selected)
+          if (selected.length === 0) return
+          const selectedIds = new Set(selected.map((n) => n.id))
+          const copiedEdges = edgesRef.current.filter(
+            (edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target)
+          )
+          clipboardRef.current = { nodes: selected, edges: copiedEdges }
+          return
+        }
+        if (e.key === 'v') {
+          if (!clipboardRef.current || isRunningRef.current) return
+          e.preventDefault()
+          pushHistory()
+          const idMap = new Map<string, string>()
+          const offset = 24
+          nodeIdCounter.current += 1
+          const base = Date.now()
+          const newNodes = clipboardRef.current.nodes.map((n, i) => {
+            const newId = `node-${base}-${nodeIdCounter.current + i}`
+            idMap.set(n.id, newId)
+            return { ...n, id: newId, position: { x: n.position.x + offset, y: n.position.y + offset }, selected: true }
+          })
+          nodeIdCounter.current += newNodes.length
+          const newEdges = clipboardRef.current.edges.map((e) => ({
+            ...e,
+            id: `edge-${base}-${Math.random().toString(36).slice(2)}`,
+            source: idMap.get(e.source) ?? e.source,
+            target: idMap.get(e.target) ?? e.target,
+          }))
+          setNodes((nds) => [...nds.map((n) => ({ ...n, selected: false })), ...newNodes])
+          setEdges((eds) => [...eds, ...newEdges])
+          setDirty(true)
+          return
+        }
       }
 
       if (e.key !== 'Backspace' && e.key !== 'Delete') return

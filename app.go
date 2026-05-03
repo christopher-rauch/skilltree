@@ -92,10 +92,30 @@ type Skill struct {
 }
 
 type skillFrontmatter struct {
-	Name         string `yaml:"name"`
-	Description  string `yaml:"description"`
-	ArgumentHint string `yaml:"argument-hint,omitempty"`
-	AllowedTools string `yaml:"allowed-tools,omitempty"`
+	Name         string      `yaml:"name"`
+	Description  string      `yaml:"description"`
+	ArgumentHint interface{} `yaml:"argument-hint,omitempty"`
+	AllowedTools interface{} `yaml:"allowed-tools,omitempty"`
+}
+
+// yamlFieldToString coerces a YAML value to a string. Unquoted bracket
+// sequences like [ticket key] are parsed by the YAML library as []interface{},
+// so we reconstruct the original bracket notation rather than rejecting the file.
+func yamlFieldToString(v interface{}) string {
+	switch val := v.(type) {
+	case string:
+		return val
+	case []interface{}:
+		parts := make([]string, 0, len(val))
+		for _, p := range val {
+			parts = append(parts, fmt.Sprint(p))
+		}
+		return "[" + strings.Join(parts, ", ") + "]"
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(val)
+	}
 }
 
 type XYPosition struct {
@@ -221,8 +241,8 @@ func parseSkillFile(path string, scope string) (Skill, error) {
 	return Skill{
 		Name:         fm.Name,
 		Description:  fm.Description,
-		ArgumentHint: fm.ArgumentHint,
-		AllowedTools: fm.AllowedTools,
+		ArgumentHint: yamlFieldToString(fm.ArgumentHint),
+		AllowedTools: yamlFieldToString(fm.AllowedTools),
 		Body:         body,
 		Scope:        scope,
 	}, nil
@@ -623,21 +643,70 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 		}
 
 		for _, node := range nodes {
-			sName, _ := node.Data["skillName"].(string)
 			label, _ := node.Data["label"].(string)
-			desc, _ := node.Data["description"].(string)
-			if label == "" {
-				label = sName
-			}
-			fmt.Fprintf(&sb, "### %s\n\n", label)
-			if desc != "" {
-				fmt.Fprintf(&sb, "> %s\n\n", desc)
-			}
-			if libSkill, ok := libraryIndex[sName]; ok {
-				sb.WriteString(strings.TrimSpace(libSkill.Body))
-				sb.WriteString("\n\n")
-			} else {
-				fmt.Fprintf(&sb, "Invoke `/%s`.\n\n", sName)
+
+			switch node.Type {
+			case "block-file":
+				filePath, _ := node.Data["filePath"].(string)
+				instruction, _ := node.Data["instruction"].(string)
+				if label == "" {
+					label = "File Input"
+				}
+				if instruction == "" {
+					instruction = "Use the following file content as context for subsequent steps."
+				}
+				fmt.Fprintf(&sb, "### %s\n\n", label)
+				sb.WriteString(instruction + "\n\n")
+				if filePath != "" {
+					fname := filepath.Base(filePath)
+					if fileBytes, err := os.ReadFile(filePath); err == nil {
+						fmt.Fprintf(&sb, "File: `%s`\n\n```\n%s\n```\n\n", fname, strings.TrimSpace(string(fileBytes)))
+					} else {
+						fmt.Fprintf(&sb, "File: `%s` _(could not read at export time)_\n\n", filePath)
+					}
+				}
+
+			case "block-text":
+				content, _ := node.Data["content"].(string)
+				if label == "" {
+					label = "Text Block"
+				}
+				fmt.Fprintf(&sb, "### %s\n\n", label)
+				if strings.TrimSpace(content) != "" {
+					sb.WriteString(strings.TrimSpace(content))
+					sb.WriteString("\n\n")
+				}
+
+			case "block-command":
+				scriptPath, _ := node.Data["scriptPath"].(string)
+				if label == "" {
+					label = "Run Command"
+				}
+				fmt.Fprintf(&sb, "### %s\n\n", label)
+				if scriptPath != "" {
+					if scriptBytes, err := os.ReadFile(scriptPath); err == nil {
+						fmt.Fprintf(&sb, "Run the following shell script:\n\n```bash\n%s\n```\n\n", strings.TrimSpace(string(scriptBytes)))
+					} else {
+						fmt.Fprintf(&sb, "Run script: `%s`\n\n", scriptPath)
+					}
+				}
+
+			default: // "skill" node
+				sName, _ := node.Data["skillName"].(string)
+				desc, _ := node.Data["description"].(string)
+				if label == "" {
+					label = sName
+				}
+				fmt.Fprintf(&sb, "### %s\n\n", label)
+				if desc != "" {
+					fmt.Fprintf(&sb, "> %s\n\n", desc)
+				}
+				if libSkill, ok := libraryIndex[sName]; ok {
+					sb.WriteString(strings.TrimSpace(libSkill.Body))
+					sb.WriteString("\n\n")
+				} else {
+					fmt.Fprintf(&sb, "Invoke `/%s`.\n\n", sName)
+				}
 			}
 		}
 
@@ -652,4 +721,44 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 	}
 
 	return a.SaveSkill(generated, "")
+}
+
+// SelectAnyFile opens a native file dialog with no type filter.
+func (a *App) SelectAnyFile() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select File",
+	})
+}
+
+// SelectScriptFile opens a native file dialog and returns the chosen path.
+func (a *App) SelectScriptFile() (string, error) {
+	return runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select Shell Script",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Shell Scripts (*.sh, *.bash, *.zsh)", Pattern: "*.sh;*.bash;*.zsh"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
+}
+
+// SaveBlockAsLibrarySkill writes a building-block node's content to the library
+// skills directory so it can be reused across flows.
+func (a *App) SaveBlockAsLibrarySkill(name, content, blockType string) error {
+	var body string
+	switch blockType {
+	case "command":
+		scriptBytes, err := os.ReadFile(content) // content = scriptPath for command blocks
+		if err != nil {
+			return fmt.Errorf("could not read script file: %w", err)
+		}
+		body = fmt.Sprintf("Run the following shell script:\n\n```bash\n%s\n```", strings.TrimSpace(string(scriptBytes)))
+	default: // "text"
+		body = content
+	}
+	skill := Skill{Name: name, Body: body, Scope: "library"}
+	if err := a.SaveSkill(skill, ""); err != nil {
+		return err
+	}
+	runtime.EventsEmit(a.ctx, "mcp:refresh")
+	return nil
 }

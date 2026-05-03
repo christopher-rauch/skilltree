@@ -174,22 +174,67 @@ func (a *App) executeFlow(ctx context.Context, flow Flow) error {
 }
 
 func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string) {
-	skillName, _ := node.Data["skillName"].(string)
 	label, _ := node.Data["label"].(string)
 	if label == "" {
-		label = skillName
+		label = node.Type
 	}
 
 	runtime.EventsEmit(a.ctx, "run:node-active", node.ID)
 	a.emitTerminal(fmt.Sprintf("\r\n\x1b[1;33m▶ %s\x1b[0m\r\n", label))
 
-	prompt := a.resolveSkillPrompt(skillName)
+	var runErr error
+	switch node.Type {
+	case "block-file":
+		filePath, _ := node.Data["filePath"].(string)
+		instruction, _ := node.Data["instruction"].(string)
+		if filePath == "" {
+			a.emitTerminal("\x1b[33m⚠ No file selected — skipping\x1b[0m\r\n")
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		}
+		fileBytes, err := os.ReadFile(filePath)
+		if err != nil {
+			a.emitTerminal(fmt.Sprintf("\x1b[31m✗ Could not read file: %s\x1b[0m\r\n", err.Error()))
+			runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+			return
+		}
+		if instruction == "" {
+			instruction = "Use the following file content as context for subsequent steps."
+		}
+		fname := filepath.Base(filePath)
+		prompt := fmt.Sprintf("%s\n\nFile: %s\n\n```\n%s\n```", instruction, fname, strings.TrimSpace(string(fileBytes)))
+		runErr = a.runClaudePrompt(ctx, claudePath, dir, prompt)
 
-	if err := a.runClaudePrompt(ctx, claudePath, dir, prompt); err != nil {
+	case "block-text":
+		content, _ := node.Data["content"].(string)
+		if strings.TrimSpace(content) == "" {
+			a.emitTerminal("\x1b[33m⚠ Text block is empty — skipping\x1b[0m\r\n")
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		}
+		runErr = a.runClaudePrompt(ctx, claudePath, dir, content)
+
+	case "block-command":
+		scriptPath, _ := node.Data["scriptPath"].(string)
+		if scriptPath == "" {
+			a.emitTerminal("\x1b[33m⚠ No script selected — skipping\x1b[0m\r\n")
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		}
+		runErr = a.runShellScript(ctx, dir, scriptPath)
+
+	default: // skill node
+		skillName, _ := node.Data["skillName"].(string)
+		argumentValue, _ := node.Data["argumentValue"].(string)
+		prompt := a.resolveSkillPrompt(skillName, argumentValue)
+		runErr = a.runClaudePrompt(ctx, claudePath, dir, prompt)
+	}
+
+	if runErr != nil {
 		if ctx.Err() != nil {
 			return
 		}
-		a.emitTerminal(fmt.Sprintf("\r\n\x1b[1;31m✗ %s failed: %s\x1b[0m\r\n", label, err.Error()))
+		a.emitTerminal(fmt.Sprintf("\r\n\x1b[1;31m✗ %s failed: %s\x1b[0m\r\n", label, runErr.Error()))
 		runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
 		return
 	}
@@ -198,12 +243,44 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 	runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
 }
 
+func (a *App) runShellScript(ctx context.Context, dir, scriptPath string) error {
+	cmd := exec.CommandContext(ctx, "bash", scriptPath)
+	cmd.Dir = dir
+
+	fullPath := os.Getenv("PATH")
+	if out, err := exec.Command(os.Getenv("SHELL"), "-l", "-c", "echo $PATH").Output(); err == nil {
+		if p := strings.TrimSpace(string(out)); p != "" {
+			fullPath = p
+		}
+	}
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "PATH="+fullPath)
+
+	stdout, _ := cmd.StdoutPipe()
+	stderr, _ := cmd.StderrPipe()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); a.pipeToTerminal(stdout) }()
+	go func() { defer wg.Done(); a.pipeToTerminal(stderr) }()
+	wg.Wait()
+	return cmd.Wait()
+}
+
 // resolveSkillPrompt returns the prompt to pass to claude -p.
 // Library skills inline their body; global/project skills invoke by name.
-func (a *App) resolveSkillPrompt(skillName string) string {
+// argumentValue is appended when provided.
+func (a *App) resolveSkillPrompt(skillName, argumentValue string) string {
 	libPath := filepath.Join(librarySkillsDir(), skillName, "SKILL.md")
 	if skill, err := parseSkillFile(libPath, "library"); err == nil && skill.Body != "" {
+		if argumentValue != "" {
+			return skill.Body + "\n\nArgument: " + argumentValue
+		}
 		return skill.Body
+	}
+	if argumentValue != "" {
+		return "/" + skillName + " " + argumentValue
 	}
 	return "/" + skillName
 }

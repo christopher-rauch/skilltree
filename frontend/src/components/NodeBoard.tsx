@@ -26,6 +26,7 @@ import { useStore } from '../store'
 import { Flow, FlowNode, FlowEdge } from '../types'
 import { SkillNode } from './SkillNode'
 import { AnnotationTextNode, AnnotationStickyNode, AnnotationDrawingNode } from './AnnotationNodes'
+import { TextBlockNode, RunCommandNode, FileInputNode } from './BuildingBlockNodes'
 import {
   SaveFlow,
   DeleteFlow,
@@ -38,7 +39,7 @@ import {
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   Plus, Save, Trash2, Download, ChevronDown, Check, X, Copy, AlertTriangle,
-  Type, StickyNote, Pen, Play, Square,
+  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip,
 } from 'lucide-react'
 import { ProjectScopeInfo } from './ProjectScopeInfo'
 import { GithubButton } from './GithubButton'
@@ -49,12 +50,17 @@ const nodeTypes = {
   'annotation-text':    AnnotationTextNode,
   'annotation-sticky':  AnnotationStickyNode,
   'annotation-drawing': AnnotationDrawingNode,
+  'block-text':    TextBlockNode,
+  'block-command': RunCommandNode,
+  'block-file':    FileInputNode,
 }
 
 export const BadgeContext = createContext<Map<string, string>>(new Map())
 
 export type RunStatus = 'running' | 'done' | 'error'
 export const RunContext = createContext<Map<string, RunStatus>>(new Map())
+export const IsRunningContext = createContext(false)
+export const SetDirtyContext = createContext<() => void>(() => {})
 
 function computeNodeBadges(nodes: Node[], edges: Edge[]): Map<string, string> {
   const connectedIds = new Set<string>()
@@ -205,6 +211,8 @@ export function NodeBoard({ onRefresh }: Props) {
   // Flow run state
   const [runState, setRunState] = useState<Map<string, RunStatus>>(new Map())
   const [isRunning, setIsRunning] = useState(false)
+  const isRunningRef = useRef(false)
+  useEffect(() => { isRunningRef.current = isRunning }, [isRunning])
 
   useEffect(() => {
     EventsOn('run:node-active', (nodeId: string) =>
@@ -371,6 +379,11 @@ export function NodeBoard({ onRefresh }: Props) {
     return () => { setOnSaveBoard(null); setOnDiscardBoard(null) }
   }, [])
 
+  const hasEmptyArgs = useMemo(() =>
+    nodes.some((n) => !n.type?.startsWith('annotation-') && n.data.argumentHint && !(n.data.argumentValue as string | undefined)?.trim()),
+    [nodes]
+  )
+
   // Detect gaps: rogue nodes (no connections) or disconnected subgraphs
   const flowWarning = useMemo(() => {
     const skillNodes = nodes.filter((n) => !n.type?.startsWith('annotation-'))
@@ -415,6 +428,7 @@ export function NodeBoard({ onRefresh }: Props) {
   // Delete selected nodes (+ their edges) on Backspace, unless focus is in a text field
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      if (isRunningRef.current) return
       if (e.key !== 'Backspace' && e.key !== 'Delete') return
       const t = e.target as HTMLElement
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return
@@ -434,14 +448,21 @@ export function NodeBoard({ onRefresh }: Props) {
   }, [])
 
   function toRFNodes(flowNodes: FlowNode[], annotations: Flow['annotations'] = []): Node[] {
-    const skill = flowNodes.map((n) => ({
-      id: n.id,
-      type: n.type || 'skill',
-      position: n.position,
-      data: n.data,
-      ...(n.width  ? { width:  n.width  } : {}),
-      ...(n.height ? { height: n.height } : {}),
-    }))
+    const skill = flowNodes.map((n) => {
+      const skillName = n.data.skillName as string | undefined
+      const matchedSkill = skills.find((s) => s.name === skillName)
+      return {
+        id: n.id,
+        type: n.type || 'skill',
+        position: n.position,
+        data: {
+          ...n.data,
+          ...(matchedSkill?.argumentHint ? { argumentHint: matchedSkill.argumentHint } : {}),
+        },
+        ...(n.width  ? { width:  n.width  } : {}),
+        ...(n.height ? { height: n.height } : {}),
+      }
+    })
     const ann = (annotations ?? []).map((a) => ({
       id: a.id,
       type: `annotation-${a.type}`,
@@ -487,6 +508,7 @@ export function NodeBoard({ onRefresh }: Props) {
 
   const onConnect = useCallback(
     (params: Connection) => {
+      if (isRunningRef.current) return
       if (params.source === params.target) return
 
       // Reject if adding this edge would create a cycle:
@@ -529,8 +551,35 @@ export function NodeBoard({ onRefresh }: Props) {
   const onDrop = useCallback(
     (e: React.DragEvent) => {
       e.preventDefault()
+      if (isRunningRef.current || !rfInstance.current) return
+
+      // Building block drop
+      const blockRaw = e.dataTransfer.getData('application/skilltree-block')
+      if (blockRaw) {
+        const { blockType } = JSON.parse(blockRaw)
+        const position = rfInstance.current.screenToFlowPosition({ x: e.clientX - 120, y: e.clientY - 40 })
+        nodeIdCounter.current += 1
+        const id = `node-${Date.now()}-${nodeIdCounter.current}`
+        const defaults: Record<string, { label: string; height: number; data: Record<string, unknown> }> = {
+          text:    { label: 'Text Block',  height: 180, data: { content: '' } },
+          command: { label: 'Run Command', height: 90,  data: { scriptPath: '' } },
+          file:    { label: 'File Input',  height: 140, data: { filePath: '', instruction: '' } },
+        }
+        const def = defaults[blockType] ?? defaults.text
+        setNodes((nds) => [...nds, {
+          id,
+          type: `block-${blockType}`,
+          position,
+          width: 240,
+          height: def.height,
+          data: { label: def.label, ...def.data },
+        }])
+        setDirty(true)
+        return
+      }
+
       const raw = e.dataTransfer.getData('application/skilltree')
-      if (!raw || !rfInstance.current) return
+      if (!raw) return
 
       const skill = JSON.parse(raw)
       // screenToFlowPosition accounts for current pan and zoom level.
@@ -554,6 +603,7 @@ export function NodeBoard({ onRefresh }: Props) {
           skillName: skill.name,
           label: skill.name,
           description: skill.description,
+          ...(skill.argumentHint ? { argumentHint: skill.argumentHint } : {}),
         },
       }
 
@@ -781,8 +831,8 @@ export function NodeBoard({ onRefresh }: Props) {
           {skills.map((skill) => (
             <div
               key={`${skill.scope}-${skill.name}`}
-              className="palette-item"
-              draggable
+              className={`palette-item ${isRunning ? 'disabled' : ''}`}
+              draggable={!isRunning}
               onDragStart={(e) => {
                 e.dataTransfer.setData('application/skilltree', JSON.stringify(skill))
                 e.dataTransfer.effectAllowed = 'copy'
@@ -794,6 +844,31 @@ export function NodeBoard({ onRefresh }: Props) {
           ))}
         </div>
         <div className="palette-tools-section">
+          <div className="palette-tools-header">Building Blocks</div>
+          <div className="palette-tools-list">
+            {([
+              { blockType: 'text',    icon: <Type size={13} />,      label: 'Text Block'   },
+              { blockType: 'command', icon: <Terminal size={13} />,  label: 'Run Command'  },
+              { blockType: 'file',    icon: <Paperclip size={13} />, label: 'File Input'   },
+            ] as const).map(({ blockType, icon, label }) => (
+              <div
+                key={blockType}
+                className={`palette-item ${isRunning ? 'disabled' : ''}`}
+                draggable={!isRunning}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('application/skilltree-block', JSON.stringify({ blockType }))
+                  e.dataTransfer.effectAllowed = 'copy'
+                }}
+              >
+                <span className="palette-item-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {icon}{label}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="palette-tools-section">
           <div className="palette-tools-header">Canvas Tools</div>
           <div className="palette-tools-list">
             {([
@@ -804,7 +879,8 @@ export function NodeBoard({ onRefresh }: Props) {
               <button
                 key={tool}
                 className={`palette-tool-btn ${annotationTool === tool ? 'active' : ''}`}
-                onClick={() => setAnnotationTool(annotationTool === tool ? null : tool)}
+                onClick={() => !isRunning && setAnnotationTool(annotationTool === tool ? null : tool)}
+                disabled={isRunning}
                 title={label}
               >
                 {icon}
@@ -897,7 +973,8 @@ export function NodeBoard({ onRefresh }: Props) {
                 <button
                   className="btn-primary toolbar-btn"
                   onClick={handleRun}
-                  title="Run skilltree step by step"
+                  disabled={dirty || hasEmptyArgs}
+                  title={dirty ? 'Save before running' : hasEmptyArgs ? 'Fill in all argument inputs before running' : 'Run skilltree step by step'}
                 >
                   <Play size={14} /> Run
                 </button>
@@ -939,7 +1016,7 @@ export function NodeBoard({ onRefresh }: Props) {
             }
 
             // Left-click annotation tool (pane only)
-            if (e.button === 0 && !onNode && rfInstance.current) {
+            if (e.button === 0 && !onNode && rfInstance.current && !isRunningRef.current) {
               const tool = annotationToolRef.current
               if (tool === 'text' || tool === 'sticky') {
                 const pos = rfInstance.current.screenToFlowPosition({ x: e.clientX, y: e.clientY })
@@ -986,6 +1063,8 @@ export function NodeBoard({ onRefresh }: Props) {
               </button>
             </div>
           ) : (
+            <SetDirtyContext.Provider value={() => setDirty(true)}>
+            <IsRunningContext.Provider value={isRunning}>
             <RunContext.Provider value={runState}>
             <BadgeContext.Provider value={nodeBadges}>
             <ReactFlow
@@ -1013,6 +1092,8 @@ export function NodeBoard({ onRefresh }: Props) {
               snapToGrid
               snapGrid={[16, 16]}
               deleteKeyCode={null}
+              nodesDraggable={!isRunning}
+              nodesConnectable={!isRunning}
               panOnDrag={annotationTool === null}
               proOptions={{ hideAttribution: true }}
             >
@@ -1039,6 +1120,8 @@ export function NodeBoard({ onRefresh }: Props) {
             </ReactFlow>
             </BadgeContext.Provider>
             </RunContext.Provider>
+            </IsRunningContext.Provider>
+            </SetDirtyContext.Provider>
           )}
         </div>
       </div>

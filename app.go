@@ -28,7 +28,8 @@ type App struct {
 	runCancel  context.CancelFunc
 	runCap     *strings.Builder
 	runCapMu   sync.Mutex
-	gateCh     chan bool // receives approval gate responses from the frontend
+	gateCh     chan bool
+	settings   AppSettings
 }
 
 // GateResponse is called by the frontend when the user approves or aborts a gate.
@@ -44,6 +45,7 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.settings = loadSettings()
 	port, err := startMCPServer(a)
 	if err == nil {
 		a.mcpPort = port
@@ -169,6 +171,7 @@ type Flow struct {
 	Nodes       []FlowNode       `json:"nodes"`
 	Edges       []FlowEdge       `json:"edges"`
 	Annotations []FlowAnnotation `json:"annotations,omitempty"`
+	UpdatedAt   int64            `json:"updatedAt,omitempty"` // Unix ms, populated from file mtime
 }
 
 // flowContentHash hashes skill names + edge topology (ignores node positions).
@@ -201,12 +204,18 @@ func flowContentHash(flow Flow) string {
 
 // --- Path helpers ---
 
-func globalSkillsDir() string {
+func (a *App) globalSkillsDir() string {
+	if a.settings.GlobalSkillsDir != "" {
+		return a.settings.GlobalSkillsDir
+	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".claude", "skills")
 }
 
-func librarySkillsDir() string {
+func (a *App) librarySkillsDir() string {
+	if a.settings.LibrarySkillsDir != "" {
+		return a.settings.LibrarySkillsDir
+	}
 	home, _ := os.UserHomeDir()
 	return filepath.Join(home, ".claude", "skilltree", "skills")
 }
@@ -215,7 +224,11 @@ func (a *App) projectSkillsDir() string {
 	if a.projectDir == "" {
 		return ""
 	}
-	return filepath.Join(a.projectDir, ".claude", "skills")
+	rel := a.settings.ProjectSkillsRelPath
+	if rel == "" {
+		rel = filepath.Join(".claude", "skills")
+	}
+	return filepath.Join(a.projectDir, rel)
 }
 
 func flowsDir() string {
@@ -317,7 +330,7 @@ func writeSkillFile(dir string, skill Skill) error {
 // --- Exported skill methods ---
 
 func (a *App) GetGlobalSkills() ([]Skill, error) {
-	return loadSkillsFromDir(globalSkillsDir(), "global")
+	return loadSkillsFromDir(a.globalSkillsDir(), "global")
 }
 
 func (a *App) GetProjectSkills() ([]Skill, error) {
@@ -353,9 +366,9 @@ func (a *App) SaveSkill(skill Skill, originalName string) error {
 	var dir string
 	switch skill.Scope {
 	case "global":
-		dir = globalSkillsDir()
+		dir = a.globalSkillsDir()
 	case "library":
-		dir = librarySkillsDir()
+		dir = a.librarySkillsDir()
 	default:
 		dir = a.projectSkillsDir()
 		if dir == "" {
@@ -375,9 +388,9 @@ func (a *App) DeleteSkill(name string, scope string) error {
 	var dir string
 	switch scope {
 	case "global":
-		dir = globalSkillsDir()
+		dir = a.globalSkillsDir()
 	case "library":
-		dir = librarySkillsDir()
+		dir = a.librarySkillsDir()
 	default:
 		dir = a.projectSkillsDir()
 		if dir == "" {
@@ -388,7 +401,7 @@ func (a *App) DeleteSkill(name string, scope string) error {
 }
 
 func (a *App) GetLibrarySkills() ([]Skill, error) {
-	return loadSkillsFromDir(librarySkillsDir(), "library")
+	return loadSkillsFromDir(a.librarySkillsDir(), "library")
 }
 
 // --- Exported flow methods ---
@@ -415,6 +428,9 @@ func (a *App) GetFlows() ([]Flow, error) {
 		var flow Flow
 		if err := json.Unmarshal(data, &flow); err != nil {
 			continue
+		}
+		if info, err := entry.Info(); err == nil {
+			flow.UpdatedAt = info.ModTime().UnixMilli()
 		}
 		flows = append(flows, flow)
 	}
@@ -497,21 +513,164 @@ func (a *App) GenerateFlowDescriptions() {
 	}
 }
 
-func generateDescription(flow Flow) (string, error) {
-	var skillNames []string
-	for _, n := range flow.Nodes {
-		if s, ok := n.Data["skillName"].(string); ok && s != "" {
-			skillNames = append(skillNames, s)
+// DuplicateFlow creates a copy of the given flow with " (copy)" appended to the name.
+func (a *App) DuplicateFlow(flowID string) (Flow, error) {
+	flows, err := a.GetFlows()
+	if err != nil {
+		return Flow{}, err
+	}
+	var src *Flow
+	for i := range flows {
+		if flows[i].ID == flowID {
+			src = &flows[i]
+			break
 		}
 	}
-	sort.Strings(skillNames)
+	if src == nil {
+		return Flow{}, fmt.Errorf("flow %q not found", flowID)
+	}
+	newID := a.NewFlowID()
+	dup := *src
+	dup.ID = newID
+	dup.Name = src.Name + " (copy)"
+	dup.ContentHash = ""
+	dup.Description = src.Description
+	dup.UpdatedAt = 0
+	data, err := json.MarshalIndent(dup, "", "  ")
+	if err != nil {
+		return Flow{}, err
+	}
+	if err := os.WriteFile(filepath.Join(flowsDir(), newID+".json"), data, 0644); err != nil {
+		return Flow{}, err
+	}
+	return dup, nil
+}
+
+// RegenerateFlowDescription forces a fresh description for the given flow ID,
+// even if one already exists, and emits "flow:description_updated" when done.
+func (a *App) RegenerateFlowDescription(flowID string) {
+	if !a.ClaudeAvailable() {
+		return
+	}
+	flows, err := a.GetFlows()
+	if err != nil {
+		return
+	}
+	var target *Flow
+	for i := range flows {
+		if flows[i].ID == flowID {
+			target = &flows[i]
+			break
+		}
+	}
+	if target == nil || len(target.Nodes) == 0 {
+		return
+	}
+	go func(flow Flow) {
+		desc, err := generateDescription(flow)
+		if err != nil || desc == "" {
+			return
+		}
+		flow.Description = desc
+		flow.ContentHash = "" // reset so next auto-run picks it up cleanly
+		dir := flowsDir()
+		data, err := json.MarshalIndent(flow, "", "  ")
+		if err != nil {
+			return
+		}
+		_ = os.WriteFile(filepath.Join(dir, flow.ID+".json"), data, 0644)
+		runtime.EventsEmit(a.ctx, "flow:description_updated", map[string]string{
+			"id": flow.ID, "description": desc,
+		})
+	}(*target)
+}
+
+func truncate(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
+}
+
+func generateDescription(flow Flow) (string, error) {
+	// Build a rich summary of every node so Claude can describe real behaviour.
+	var steps []string
+	for _, n := range flow.Nodes {
+		label, _ := n.Data["label"].(string)
+		switch n.Type {
+		case "skill":
+			name, _ := n.Data["skillName"].(string)
+			desc, _ := n.Data["description"].(string)
+			if name == "" {
+				continue
+			}
+			entry := "skill:" + name
+			if desc != "" {
+				entry += " (" + truncate(desc, 60) + ")"
+			}
+			steps = append(steps, entry)
+		case "block-text":
+			content, _ := n.Data["content"].(string)
+			if content == "" {
+				continue
+			}
+			if label == "" {
+				label = "prompt"
+			}
+			steps = append(steps, label+": "+truncate(content, 80))
+		case "block-command":
+			path, _ := n.Data["scriptPath"].(string)
+			steps = append(steps, "run script: "+filepath.Base(path))
+		case "block-file":
+			path, _ := n.Data["filePath"].(string)
+			instr, _ := n.Data["instruction"].(string)
+			entry := "file input: " + filepath.Base(path)
+			if instr != "" {
+				entry += " — " + truncate(instr, 50)
+			}
+			steps = append(steps, entry)
+		case "block-context":
+			content, _ := n.Data["content"].(string)
+			steps = append(steps, "context: "+truncate(content, 60))
+		case "block-condition":
+			cond, _ := n.Data["condition"].(string)
+			steps = append(steps, "condition: "+truncate(cond, 60))
+		case "block-loop":
+			loopPrompt, _ := n.Data["prompt"].(string)
+			countRaw, _ := n.Data["count"].(float64)
+			steps = append(steps, fmt.Sprintf("loop ×%.0f: %s", countRaw, truncate(loopPrompt, 50)))
+		case "block-http":
+			method, _ := n.Data["method"].(string)
+			url, _ := n.Data["url"].(string)
+			steps = append(steps, method+" "+truncate(url, 60))
+		case "block-mcp":
+			server, _ := n.Data["serverName"].(string)
+			tool, _ := n.Data["toolName"].(string)
+			steps = append(steps, "mcp:"+server+"/"+tool)
+		case "block-gate":
+			msg, _ := n.Data["message"].(string)
+			steps = append(steps, "approval gate: "+truncate(msg, 50))
+		case "block-output":
+			steps = append(steps, "capture output")
+		case "block-variable":
+			steps = append(steps, "set variables")
+		}
+	}
+
+	var stepsStr string
+	if len(steps) > 0 {
+		stepsStr = strings.Join(steps, " → ")
+	} else {
+		stepsStr = "(no steps defined)"
+	}
 
 	prompt := fmt.Sprintf(
 		"In one sentence (max 100 characters), describe what this workflow accomplishes "+
-			"based on its name and the skills it chains together. "+
+			"based on its name and steps. Be specific about what it actually does. "+
 			"Reply with ONLY the description — no quotes, no period at the end.\n\n"+
-			"Workflow name: %s\nSkills: %s\nConnections: %d",
-		flow.Name, strings.Join(skillNames, ", "), len(flow.Edges),
+			"Workflow name: %s\nSteps: %s\nConnections: %d",
+		flow.Name, stepsStr, len(flow.Edges),
 	)
 
 	claudePath, err := shellWhich("claude")
@@ -924,6 +1083,22 @@ func applyExportVars(s string, vars map[string]string) string {
 		s = strings.ReplaceAll(s, "{{"+name+"}}", value)
 	}
 	return s
+}
+
+// SaveTerminalToFile opens a native save dialog and writes the terminal content.
+func (a *App) SaveTerminalToFile(content string) error {
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save Terminal Session",
+		DefaultFilename: "terminal-session.txt",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Text Files (*.txt)", Pattern: "*.txt"},
+			{DisplayName: "All Files (*.*)", Pattern: "*.*"},
+		},
+	})
+	if err != nil || path == "" {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0644)
 }
 
 // SelectAnyFile opens a native file dialog with no type filter.

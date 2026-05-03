@@ -425,3 +425,74 @@ export function VariableNode({ id, data, selected }: { id: string; data: Variabl
     </>
   )
 }
+
+// ── Output Capture ───────────────────────────────────────────────────────────
+
+interface OutputCaptureData {
+  label?: string
+  destination?: 'file' | 'clipboard'
+  filePath?: string
+  [key: string]: unknown
+}
+
+export function OutputCaptureNode({ id, data, selected }: { id: string; data: OutputCaptureData; selected: boolean }) {
+  const { updateNodeData } = useReactFlow()
+  const isRunning = useContext(IsRunningContext)
+  const runStatus = useContext(RunContext).get(id)
+  const markDirty = useContext(SetDirtyContext)
+
+  const dest = data.destination ?? 'file'
+  const basename = data.filePath ? data.filePath.split('/').pop() ?? data.filePath : ''
+
+  async function handleBrowse() {
+    const path = await SelectAnyFile()
+    if (path) { updateNodeData(id, { ...data, filePath: path }); markDirty() }
+  }
+
+  return (
+    <>
+      <BlockBadge id={id} />
+      <Handle type="target" position={Position.Top} style={HANDLE_STYLE} />
+      <Handle type="source" position={Position.Bottom} style={HANDLE_STYLE} />
+      <BlockResizeControls selected={selected} />
+
+      <div className={`block-node block-output ${selected ? 'selected' : ''} ${runStatus ?? ''}`}>
+        <div className="block-header">
+          <Paperclip size={12} className="block-icon block-output-icon" />
+          <input
+            className="block-label-input nodrag nopan nowheel"
+            value={data.label ?? 'Output Capture'}
+            disabled={isRunning}
+            onChange={(e) => { updateNodeData(id, { ...data, label: e.target.value }); markDirty() }}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        </div>
+        <div className="block-dest-toggle nodrag nopan nowheel">
+          <button
+            className={`block-dest-btn ${dest === 'file' ? 'active' : ''}`}
+            disabled={isRunning}
+            onClick={() => { updateNodeData(id, { ...data, destination: 'file' }); markDirty() }}
+          >File</button>
+          <button
+            className={`block-dest-btn ${dest === 'clipboard' ? 'active' : ''}`}
+            disabled={isRunning}
+            onClick={() => { updateNodeData(id, { ...data, destination: 'clipboard' }); markDirty() }}
+          >Clipboard</button>
+        </div>
+        {dest === 'file' && (
+          <div className="block-file-row nodrag nopan nowheel">
+            <span className="block-file-path" title={data.filePath ?? ''}>
+              {basename || <span className="block-file-placeholder">No file selected</span>}
+            </span>
+            <button className="block-browse-btn nodrag nopan" onClick={handleBrowse} disabled={isRunning} title="Browse">
+              <FolderOpen size={12} />
+            </button>
+          </div>
+        )}
+        {dest === 'clipboard' && (
+          <div className="block-clipboard-note">Copies output to macOS clipboard</div>
+        )}
+      </div>
+    </>
+  )
+}

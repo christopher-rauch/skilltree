@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -101,10 +102,16 @@ func (a *App) RunFlow(flow Flow) error {
 	}
 	ctx, cancel := context.WithCancel(a.ctx)
 	a.runCancel = cancel
+	a.runCapMu.Lock()
+	a.runCap = &strings.Builder{}
+	a.runCapMu.Unlock()
 
 	go func() {
 		defer func() {
 			a.runCancel = nil
+			a.runCapMu.Lock()
+			a.runCap = nil
+			a.runCapMu.Unlock()
 			runtime.EventsEmit(a.ctx, "run:done")
 		}()
 		if err := a.executeFlow(ctx, flow); err != nil && ctx.Err() == nil {
@@ -120,6 +127,9 @@ func (a *App) StopFlowRun() {
 		a.runCancel()
 		a.runCancel = nil
 	}
+	a.runCapMu.Lock()
+	a.runCap = nil
+	a.runCapMu.Unlock()
 	runtime.EventsEmit(a.ctx, "run:stopped")
 }
 
@@ -218,6 +228,51 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 
 	var runErr error
 	switch node.Type {
+	case "block-output":
+		destination, _ := node.Data["destination"].(string)
+		filePath, _ := node.Data["filePath"].(string)
+
+		// Grab and clear the capture buffer.
+		a.runCapMu.Lock()
+		var captured string
+		if a.runCap != nil {
+			captured = a.runCap.String()
+			a.runCap.Reset()
+		}
+		a.runCapMu.Unlock()
+
+		// Strip ANSI escape codes for clean output.
+		ansiRe := regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+		captured = ansiRe.ReplaceAllString(captured, "")
+		// Normalise CRLF → LF
+		captured = strings.ReplaceAll(captured, "\r\n", "\n")
+
+		switch destination {
+		case "clipboard":
+			cmd := exec.CommandContext(ctx, "bash", "-c", "pbcopy")
+			cmd.Stdin = strings.NewReader(captured)
+			if err := cmd.Run(); err != nil {
+				a.emitTerminal(fmt.Sprintf("\x1b[31m✗ Clipboard write failed: %s\x1b[0m\r\n", err.Error()))
+				runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+				return
+			}
+			a.emitTerminal("\x1b[2m  output copied to clipboard\x1b[0m\r\n")
+		default: // "file"
+			if filePath == "" {
+				a.emitTerminal("\x1b[33m⚠ No output file path set — skipping\x1b[0m\r\n")
+				runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+				return
+			}
+			if err := os.WriteFile(filePath, []byte(captured), 0644); err != nil {
+				a.emitTerminal(fmt.Sprintf("\x1b[31m✗ Could not write file: %s\x1b[0m\r\n", err.Error()))
+				runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+				return
+			}
+			a.emitTerminal(fmt.Sprintf("\x1b[2m  output saved to %s\x1b[0m\r\n", filepath.Base(filePath)))
+		}
+		runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+		return
+
 	case "block-variable":
 		varsMu.Lock()
 		for name, value := range extractVars(node) {
@@ -401,4 +456,9 @@ func (a *App) pipeToTerminal(r io.Reader) {
 func (a *App) emitTerminal(text string) {
 	encoded := base64.StdEncoding.EncodeToString([]byte(text))
 	runtime.EventsEmit(a.ctx, "terminal:output", encoded)
+	if a.runCap != nil {
+		a.runCapMu.Lock()
+		a.runCap.WriteString(text)
+		a.runCapMu.Unlock()
+	}
 }

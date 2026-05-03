@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -25,6 +26,8 @@ type App struct {
 	mcpPort    int
 	term       termState
 	runCancel  context.CancelFunc
+	runCap     *strings.Builder // captures terminal output during a flow run
+	runCapMu   sync.Mutex
 }
 
 func NewApp() *App {
@@ -649,6 +652,21 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 			label, _ := node.Data["label"].(string)
 
 			switch node.Type {
+			case "block-output":
+				destination, _ := node.Data["destination"].(string)
+				filePath, _ := node.Data["filePath"].(string)
+				if label == "" {
+					label = "Output Capture"
+				}
+				fmt.Fprintf(&sb, "### %s *(output capture)*\n\n", label)
+				if destination == "clipboard" {
+					sb.WriteString("Save all output produced so far to the clipboard.\n\n")
+				} else if filePath != "" {
+					fmt.Fprintf(&sb, "Save all output produced so far to `%s`.\n\n", filePath)
+				} else {
+					sb.WriteString("Save all output produced so far to a file.\n\n")
+				}
+
 			case "block-variable":
 				if varsList, ok := node.Data["variables"].([]interface{}); ok {
 					for _, item := range varsList {

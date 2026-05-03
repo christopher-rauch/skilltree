@@ -26,7 +26,7 @@ import { useStore } from '../store'
 import { Flow, FlowNode, FlowEdge } from '../types'
 import { SkillNode } from './SkillNode'
 import { AnnotationTextNode, AnnotationStickyNode, AnnotationDrawingNode } from './AnnotationNodes'
-import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode } from './BuildingBlockNodes'
+import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode, OutputCaptureNode } from './BuildingBlockNodes'
 import {
   SaveFlow,
   DeleteFlow,
@@ -39,7 +39,7 @@ import {
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   Plus, Save, Trash2, Download, ChevronDown, Check, X, Copy, AlertTriangle,
-  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip, Globe, Braces,
+  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip, Globe, Braces, HardDriveDownload,
 } from 'lucide-react'
 import { ProjectScopeInfo } from './ProjectScopeInfo'
 import { GithubButton } from './GithubButton'
@@ -55,6 +55,7 @@ const nodeTypes = {
   'block-file':    FileInputNode,
   'block-context':   ContextInjectorNode,
   'block-variable':  VariableNode,
+  'block-output':    OutputCaptureNode,
 }
 
 export const BadgeContext = createContext<Map<string, string>>(new Map())
@@ -568,6 +569,7 @@ export function NodeBoard({ onRefresh }: Props) {
           file:    { label: 'File Input',      height: 140, data: { filePath: '', instruction: '' } },
           context:  { label: 'Context Injector', height: 180, data: { content: '' } },
           variable: { label: 'Variables',        height: 130, data: { variables: [] } },
+          output:   { label: 'Output Capture',   height: 110, data: { destination: 'file', filePath: '' } },
         }
         const def = defaults[blockType] ?? defaults.text
         setNodes((nds) => [...nds, {
@@ -855,7 +857,8 @@ export function NodeBoard({ onRefresh }: Props) {
               { blockType: 'command', icon: <Terminal size={13} />,  label: 'Run Command'     },
               { blockType: 'file',    icon: <Paperclip size={13} />, label: 'File Input'      },
               { blockType: 'context',  icon: <Globe size={13} />,   label: 'Context Injector' },
-              { blockType: 'variable', icon: <Braces size={13} />, label: 'Variable'          },
+              { blockType: 'variable', icon: <Braces size={13} />,          label: 'Variable'        },
+              { blockType: 'output',   icon: <HardDriveDownload size={13} />, label: 'Output Capture'  },
             ] as const).map(({ blockType, icon, label }) => (
               <div
                 key={blockType}

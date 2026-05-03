@@ -40,6 +40,11 @@
 .block-variable.selected { border-color: #f43f5e; box-shadow: 0 0 0 2px rgba(244,63,94,0.12); }
 .block-variable .block-icon { color: #f43f5e; }
 
+/* Output capture — indigo accent */
+.block-output { border-color: #1e1b4b; }
+.block-output.selected { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.12); }
+.block-output-icon { color: #6366f1 !important; }
+
 /* ── Run states (mirrors SkillNode) ─────────────────────────────────────── */
 .block-node.running { border-color: var(--amber); animation: node-running-pulse 1.4s ease-in-out infinite; }
 .block-node.done    { border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-ghost); }
@@ -152,6 +157,42 @@
 
 .block-browse-btn:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
 .block-browse-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Output capture destination toggle ─────────────────────────────────── */
+
+.block-dest-toggle {
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px 4px;
+  flex-shrink: 0;
+}
+
+.block-dest-btn {
+  flex: 1;
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  color: var(--text-2);
+  font-size: 11px;
+  padding: 3px 0;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.block-dest-btn.active {
+  background: rgba(99,102,241,0.15);
+  color: #6366f1;
+  border-color: #6366f1;
+}
+
+.block-dest-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.block-clipboard-note {
+  padding: 6px 10px 8px;
+  font-size: 11px;
+  color: var(--text-3);
+  font-style: italic;
+}
 
 /* ── Variable list ──────────────────────────────────────────────────────── */
 

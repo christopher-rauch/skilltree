@@ -26,8 +26,16 @@ type App struct {
 	mcpPort    int
 	term       termState
 	runCancel  context.CancelFunc
-	runCap     *strings.Builder // captures terminal output during a flow run
+	runCap     *strings.Builder
 	runCapMu   sync.Mutex
+	gateCh     chan bool // receives approval gate responses from the frontend
+}
+
+// GateResponse is called by the frontend when the user approves or aborts a gate.
+func (a *App) GateResponse(approved bool) {
+	if a.gateCh != nil {
+		a.gateCh <- approved
+	}
 }
 
 func NewApp() *App {
@@ -652,6 +660,18 @@ func (a *App) GenerateFlowSkill(flow Flow, skillName string, scope string) error
 			label, _ := node.Data["label"].(string)
 
 			switch node.Type {
+			case "block-gate":
+				message, _ := node.Data["message"].(string)
+				if label == "" {
+					label = "Approval Gate"
+				}
+				if message == "" {
+					message = "Continue with the flow?"
+				}
+				fmt.Fprintf(&sb, "### %s *(approval gate)*\n\n", label)
+				fmt.Fprintf(&sb, "Pause and ask the user: **\"%s\"**\n\n", message)
+				sb.WriteString("Proceed only if the user approves. Abort the run if they decline.\n\n")
+
 			case "block-http":
 				method, _ := node.Data["method"].(string)
 				if method == "" {

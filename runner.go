@@ -232,6 +232,38 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 
 	var runErr error
 	switch node.Type {
+	case "block-gate":
+		message, _ := node.Data["message"].(string)
+		if message == "" {
+			message = "Continue with the flow?"
+		}
+		a.emitTerminal("\x1b[1;33m⏸ Waiting for approval…\x1b[0m\r\n")
+
+		a.gateCh = make(chan bool, 1)
+		runtime.EventsEmit(a.ctx, "run:gate-request", map[string]interface{}{
+			"nodeId":  node.ID,
+			"message": message,
+		})
+
+		select {
+		case approved := <-a.gateCh:
+			a.gateCh = nil
+			if !approved {
+				a.emitTerminal("\x1b[1;31m✗ Run aborted by user\x1b[0m\r\n")
+				runtime.EventsEmit(a.ctx, "run:node-error", node.ID)
+				if a.runCancel != nil {
+					a.runCancel()
+				}
+				return
+			}
+			a.emitTerminal("\x1b[1;32m✓ Approved\x1b[0m\r\n")
+			runtime.EventsEmit(a.ctx, "run:node-done", node.ID)
+			return
+		case <-ctx.Done():
+			a.gateCh = nil
+			return
+		}
+
 	case "block-http":
 		method, _ := node.Data["method"].(string)
 		if method == "" {

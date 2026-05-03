@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useContext } from 'react'
 import { Handle, Position, NodeResizeControl, ResizeControlVariant, useReactFlow } from '@xyflow/react'
-import { Type, Terminal, BookOpen, FolderOpen, Paperclip, Globe, Braces, Plus, X, Wifi } from 'lucide-react'
+import { Type, Terminal, BookOpen, FolderOpen, Paperclip, Globe, Braces, Plus, X, Wifi, ShieldAlert } from 'lucide-react'
 import { BadgeContext, RunContext, IsRunningContext, SetDirtyContext } from './NodeBoard'
 import { SaveBlockAsLibrarySkill, SelectScriptFile, SelectAnyFile } from '../../wailsjs/go/main/App'
 import './BuildingBlockNodes.css'
@@ -686,6 +686,51 @@ export function HttpRequestNode({ id, data, selected }: { id: string; data: Http
             onChange={(e) => update({ responseVar: e.target.value })} onMouseDown={(e) => e.stopPropagation()} />
           <span className="block-http-resp-brace">{'}}'}</span>
         </div>
+      </div>
+    </>
+  )
+}
+
+// ── Approval Gate ────────────────────────────────────────────────────────────
+
+interface ApprovalGateData {
+  label?: string
+  message?: string
+  [key: string]: unknown
+}
+
+export function ApprovalGateNode({ id, data, selected }: { id: string; data: ApprovalGateData; selected: boolean }) {
+  const { updateNodeData } = useReactFlow()
+  const isRunning = useContext(IsRunningContext)
+  const runStatus = useContext(RunContext).get(id)
+  const markDirty = useContext(SetDirtyContext)
+
+  return (
+    <>
+      <BlockBadge id={id} />
+      <Handle type="target" position={Position.Top} style={HANDLE_STYLE} />
+      <Handle type="source" position={Position.Bottom} style={HANDLE_STYLE} />
+      <BlockResizeControls selected={selected} />
+
+      <div className={`block-node block-gate ${selected ? 'selected' : ''} ${runStatus ?? ''}`}>
+        <div className="block-header">
+          <ShieldAlert size={12} className="block-icon" />
+          <input
+            className="block-label-input nodrag nopan nowheel"
+            value={data.label ?? 'Approval Gate'}
+            disabled={isRunning}
+            onChange={(e) => { updateNodeData(id, { ...data, label: e.target.value }); markDirty() }}
+            onMouseDown={(e) => e.stopPropagation()}
+          />
+        </div>
+        <textarea
+          className="block-textarea nodrag nopan nowheel"
+          placeholder="Message shown to the user when the flow pauses here…"
+          value={data.message ?? ''}
+          disabled={isRunning}
+          onChange={(e) => { updateNodeData(id, { ...data, message: e.target.value }); markDirty() }}
+          onMouseDown={(e) => e.stopPropagation()}
+        />
       </div>
     </>
   )

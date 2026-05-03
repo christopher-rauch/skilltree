@@ -26,7 +26,7 @@ import { useStore } from '../store'
 import { Flow, FlowNode, FlowEdge } from '../types'
 import { SkillNode } from './SkillNode'
 import { AnnotationTextNode, AnnotationStickyNode, AnnotationDrawingNode } from './AnnotationNodes'
-import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode, OutputCaptureNode, HttpRequestNode } from './BuildingBlockNodes'
+import { TextBlockNode, RunCommandNode, FileInputNode, ContextInjectorNode, VariableNode, OutputCaptureNode, HttpRequestNode, ApprovalGateNode } from './BuildingBlockNodes'
 import {
   SaveFlow,
   DeleteFlow,
@@ -35,11 +35,12 @@ import {
   SetBoardDirty,
   RunFlow,
   StopFlowRun,
+  GateResponse,
 } from '../../wailsjs/go/main/App'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime/runtime'
 import {
   Plus, Save, Trash2, Download, ChevronDown, Check, X, Copy, AlertTriangle,
-  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip, Globe, Braces, HardDriveDownload, Wifi,
+  Type, StickyNote, Pen, Play, Square, Terminal, Paperclip, Globe, Braces, HardDriveDownload, Wifi, ShieldAlert,
 } from 'lucide-react'
 import { ProjectScopeInfo } from './ProjectScopeInfo'
 import { GithubButton } from './GithubButton'
@@ -57,6 +58,7 @@ const nodeTypes = {
   'block-variable':  VariableNode,
   'block-output':    OutputCaptureNode,
   'block-http':      HttpRequestNode,
+  'block-gate':      ApprovalGateNode,
 }
 
 export const BadgeContext = createContext<Map<string, string>>(new Map())
@@ -218,6 +220,9 @@ export function NodeBoard({ onRefresh }: Props) {
   const isRunningRef = useRef(false)
   useEffect(() => { isRunningRef.current = isRunning }, [isRunning])
 
+  // Approval gate
+  const [gateRequest, setGateRequest] = useState<{ nodeId: string; message: string } | null>(null)
+
   useEffect(() => {
     EventsOn('run:node-active', (nodeId: string) =>
       setRunState((prev) => new Map(prev).set(nodeId, 'running')))
@@ -227,8 +232,9 @@ export function NodeBoard({ onRefresh }: Props) {
       setRunState((prev) => new Map(prev).set(nodeId, 'error')))
     EventsOn('run:done',    () => setIsRunning(false))
     EventsOn('run:stopped', () => setIsRunning(false))
+    EventsOn('run:gate-request', (data: { nodeId: string; message: string }) => setGateRequest(data))
     return () => {
-      EventsOff('run:node-active', 'run:node-done', 'run:node-error', 'run:done', 'run:stopped')
+      EventsOff('run:node-active', 'run:node-done', 'run:node-error', 'run:done', 'run:stopped', 'run:gate-request')
     }
   }, [])
 
@@ -572,6 +578,7 @@ export function NodeBoard({ onRefresh }: Props) {
           variable: { label: 'Variables',        height: 130, data: { variables: [] } },
           output:   { label: 'Output Capture',   height: 110, data: { destination: 'file', filePath: '' } },
           http:     { label: 'HTTP Request',     height: 160, data: { method: 'GET', url: '', headers: [], body: '', responseVar: 'http_response', showHeaders: false } },
+          gate:     { label: 'Approval Gate',   height: 130, data: { message: '' } },
         }
         const def = defaults[blockType] ?? defaults.text
         setNodes((nds) => [...nds, {
@@ -861,7 +868,8 @@ export function NodeBoard({ onRefresh }: Props) {
               { blockType: 'context',  icon: <Globe size={13} />,   label: 'Context Injector' },
               { blockType: 'variable', icon: <Braces size={13} />,          label: 'Variable'        },
               { blockType: 'output',   icon: <HardDriveDownload size={13} />, label: 'Output Capture' },
-              { blockType: 'http',     icon: <Wifi size={13} />,             label: 'HTTP Request'   },
+              { blockType: 'http',     icon: <Wifi size={13} />,             label: 'HTTP Request'    },
+              { blockType: 'gate',     icon: <ShieldAlert size={13} />,      label: 'Approval Gate'   },
             ] as const).map(({ blockType, icon, label }) => (
               <div
                 key={blockType}
@@ -1252,6 +1260,25 @@ export function NodeBoard({ onRefresh }: Props) {
               </button>
               <button className="btn-danger" onClick={handleDelete}>
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Approval gate modal */}
+      {gateRequest && (
+        <div className="modal-overlay">
+          <div className="modal-dialog gate-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="gate-dialog-icon">⏸</div>
+            <h3>Approval Required</h3>
+            <p>{gateRequest.message || 'Continue with the flow?'}</p>
+            <div className="modal-actions">
+              <button className="btn-danger" onClick={() => { GateResponse(false); setGateRequest(null) }}>
+                Abort
+              </button>
+              <button className="btn-primary" onClick={() => { GateResponse(true); setGateRequest(null) }}>
+                Approve
               </button>
             </div>
           </div>

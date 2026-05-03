@@ -104,16 +104,21 @@ All templates support ` + "`{{fieldKey}}`" + ` substitution.
 
 ---
 
-## MCP tool
+## Saving the block
 
-Use the ` + "`save_custom_block`" + ` MCP tool to register the block. Pass the entire
-JSON definition as a single string to the ` + "`definition`" + ` parameter.
+**Preferred — write the file directly** (always works):
+
+` + "```" + `
+Write(~/.claude/skilltree/blocks/<id>.json, <JSON content>)
+` + "```" + `
+
+The Skilltree app watches this directory and refreshes the palette within 2 seconds.
+
+**Alternative — MCP tool** (only if ` + "`skilltree-gui`" + ` tools are available in this session):
 
 ` + "```" + `
 save_custom_block(definition: "<JSON string>")
 ` + "```" + `
-
-The Builder palette refreshes automatically — no restart needed.
 
 ---
 
@@ -161,7 +166,7 @@ The Builder palette refreshes automatically — no restart needed.
 3. Design fields that capture everything the user will need to fill in at flow-build time
 4. Pick a descriptive ` + "`id`" + ` (kebab-case), a clear ` + "`name`" + `, and a fitting hex ` + "`color`" + `
 5. Build the JSON definition
-6. Call ` + "`save_custom_block`" + ` with the JSON string
+6. Write the JSON to ` + "`~/.claude/skilltree/blocks/<id>.json`" + ` using the Write tool (preferred), or call ` + "`save_custom_block`" + ` if available
 7. Confirm success and describe how to use the new block
 `,
 	},

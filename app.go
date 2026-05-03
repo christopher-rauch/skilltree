@@ -46,6 +46,7 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.settings = loadSettings()
+	a.ensureDirectories()
 	a.ensureSystemSkills()
 	go a.watchCustomBlocks(ctx)
 	port, err := startMCPServer(a)
@@ -58,6 +59,18 @@ func (a *App) startup(ctx context.Context) {
 			[]byte(fmt.Sprintf("%d", port)),
 			0644,
 		)
+	}
+}
+
+// ensureDirectories creates all app-managed directories on first launch.
+func (a *App) ensureDirectories() {
+	for _, dir := range []string{
+		a.globalSkillsDir(),
+		a.librarySkillsDir(),
+		customBlocksDir(),
+		flowsDir(),
+	} {
+		_ = os.MkdirAll(dir, 0755)
 	}
 }
 

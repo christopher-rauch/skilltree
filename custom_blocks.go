@@ -119,7 +119,7 @@ func (a *App) GetCustomBlocks() ([]CustomBlockDef, error) {
 		}
 		return nil, err
 	}
-	var blocks []CustomBlockDef
+	blocks := make([]CustomBlockDef, 0) // never return nil — Wails encodes nil slice as JSON null
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue

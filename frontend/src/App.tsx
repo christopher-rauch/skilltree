@@ -85,7 +85,7 @@ function App() {
   useEffect(() => {
     GetProjectDir().then((d) => { if (d) setProjectDir(d) })
     ClaudeAvailable().then(setClaudeAvailable)
-    GetCustomBlocks().then((b) => setCustomBlocks(b as any)).catch(() => {})
+    GetCustomBlocks().then((b) => setCustomBlocks((b ?? []) as any)).catch(() => {})
     loadAll()
 
     // MCP events — Claude controlling the GUI
@@ -93,7 +93,7 @@ function App() {
     EventsOn('mcp:refresh', () => loadAll())
     EventsOn('run:done',    () => { setTimeout(() => terminalRef.current?.scrollToCursor(), 300) })
     EventsOn('run:stopped', () => { setTimeout(() => terminalRef.current?.scrollToCursor(), 300) })
-    EventsOn('blocks:updated', () => GetCustomBlocks().then((b) => setCustomBlocks(b as any)).catch(() => {}))
+    EventsOn('blocks:updated', () => GetCustomBlocks().then((b) => setCustomBlocks((b ?? []) as any)).catch(() => {}))
     EventsOn('mcp:open_flow', (id: string) => {
       setSelectedFlowId(id)
       setView('board')

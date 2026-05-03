@@ -1,10 +1,21 @@
-import { useContext } from 'react'
+import { useContext, useState, useRef, useEffect, useCallback } from 'react'
 import { Handle, Position, NodeResizeControl, ResizeControlVariant, useReactFlow } from '@xyflow/react'
 import { Puzzle, FolderOpen } from 'lucide-react'
 import { BadgeContext, RunContext, IsRunningContext, SetDirtyContext, CustomBlocksContext } from './NodeBoard'
 import { SelectAnyFile } from '../../wailsjs/go/main/App'
-import { useLocalValue } from './BuildingBlockNodes'
 import './CustomBlockNode.css'
+
+// Inlined to avoid circular dependency: CustomBlockNode → BuildingBlockNodes → NodeBoard → CustomBlockNode
+function useLocalValue(external: string | undefined): [string, (v: string) => void] {
+  const [local, setLocal] = useState(external ?? '')
+  const ownUpdate = useRef(false)
+  useEffect(() => {
+    if (!ownUpdate.current) setLocal(external ?? '')
+    ownUpdate.current = false
+  }, [external])
+  const set = useCallback((v: string) => { ownUpdate.current = true; setLocal(v) }, [])
+  return [local, set]
+}
 
 const HANDLE_STYLE = {
   width: 10, height: 10, borderRadius: '50%',

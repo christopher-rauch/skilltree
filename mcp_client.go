@@ -26,16 +26,33 @@ type mcpServerDef struct {
 	URL     string            `json:"url"`
 }
 
+// readClaudeSettings merges MCP server definitions from the two locations
+// Claude Code uses: ~/.claude.json (primary) and ~/.claude/settings.json.
 func readClaudeSettings() (claudeSettings, error) {
 	home, _ := os.UserHomeDir()
-	path := filepath.Join(home, ".claude", "settings.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return claudeSettings{}, err
+	merged := claudeSettings{MCPServers: map[string]mcpServerDef{}}
+
+	for _, path := range []string{
+		filepath.Join(home, ".claude.json"),
+		filepath.Join(home, ".claude", "settings.json"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var s claudeSettings
+		if err := json.Unmarshal(data, &s); err != nil {
+			continue
+		}
+		for name, def := range s.MCPServers {
+			merged.MCPServers[name] = def
+		}
 	}
-	var s claudeSettings
-	err = json.Unmarshal(data, &s)
-	return s, err
+
+	if len(merged.MCPServers) == 0 {
+		return merged, fmt.Errorf("no MCP servers found in ~/.claude.json or ~/.claude/settings.json")
+	}
+	return merged, nil
 }
 
 // GetMCPServers returns the names of all configured MCP servers.

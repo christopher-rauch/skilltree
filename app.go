@@ -110,22 +110,37 @@ func (a *App) beforeClose(ctx context.Context) bool {
 
 // --- Data types ---
 
+// SkillField defines a pre-fill input shown on the skill node in the Builder.
+// The field key/value pairs are passed to the skill as a preamble so Claude
+// never needs to ask the user interactively — keeping skills fully backward-
+// compatible when run directly in a Claude Code session.
+type SkillField struct {
+	Key         string   `yaml:"key" json:"key"`
+	Label       string   `yaml:"label" json:"label"`
+	Type        string   `yaml:"type" json:"type"` // text | textarea | select | number
+	Options     []string `yaml:"options,omitempty" json:"options,omitempty"`
+	Default     string   `yaml:"default,omitempty" json:"default,omitempty"`
+	Placeholder string   `yaml:"placeholder,omitempty" json:"placeholder,omitempty"`
+}
+
 type Skill struct {
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	ArgumentHint string `json:"argumentHint"`
-	AllowedTools string `json:"allowedTools"`
-	Body         string `json:"body"`
-	Scope        string `json:"scope"` // "global" | "project" | "library"
-	System       bool   `json:"system,omitempty"`
+	Name         string       `json:"name"`
+	Description  string       `json:"description"`
+	ArgumentHint string       `json:"argumentHint"`
+	AllowedTools string       `json:"allowedTools"`
+	Body         string       `json:"body"`
+	Scope        string       `json:"scope"` // "global" | "project" | "library"
+	System       bool         `json:"system,omitempty"`
+	Fields       []SkillField `json:"fields,omitempty"`
 }
 
 type skillFrontmatter struct {
-	Name         string      `yaml:"name"`
-	Description  string      `yaml:"description"`
-	ArgumentHint interface{} `yaml:"argument-hint,omitempty"`
-	AllowedTools interface{} `yaml:"allowed-tools,omitempty"`
-	System       bool        `yaml:"system,omitempty"`
+	Name         string       `yaml:"name"`
+	Description  string       `yaml:"description"`
+	ArgumentHint interface{}  `yaml:"argument-hint,omitempty"`
+	AllowedTools interface{}  `yaml:"allowed-tools,omitempty"`
+	System       bool         `yaml:"system,omitempty"`
+	Fields       []SkillField `yaml:"fields,omitempty"`
 }
 
 // yamlFieldToString coerces a YAML value to a string. Unquoted bracket
@@ -287,6 +302,7 @@ func parseSkillFile(path string, scope string) (Skill, error) {
 		Body:         body,
 		Scope:        scope,
 		System:       fm.System,
+		Fields:       fm.Fields,
 	}, nil
 }
 

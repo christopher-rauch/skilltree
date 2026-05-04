@@ -617,6 +617,7 @@ export function NodeBoard({ onRefresh }: Props) {
         data: {
           ...n.data,
           ...(matchedSkill?.argumentHint ? { argumentHint: matchedSkill.argumentHint } : {}),
+          ...(matchedSkill?.fields?.length ? { fields: matchedSkill.fields } : { fields: undefined }),
         },
         ...(n.width  ? { width:  n.width  } : {}),
         ...(n.height ? { height: n.height } : {}),

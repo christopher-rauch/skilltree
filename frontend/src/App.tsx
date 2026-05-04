@@ -73,7 +73,7 @@ function App() {
       const g = (global ?? []).map((s) => ({ ...s, scope: 'global' as const }))
       const p = (project ?? []).map((s) => ({ ...s, scope: 'project' as const }))
       const l = (library ?? []).map((s) => ({ ...s, scope: 'library' as const }))
-      setSkills([...g, ...p, ...l])
+      setSkills([...g, ...p, ...l] as any)
       setFlows((flows ?? []) as any)
       // Kick off description generation for any flows missing one
       GenerateFlowDescriptions()
@@ -123,7 +123,7 @@ function App() {
         const g = (global ?? []).map((s) => ({ ...s, scope: 'global' as const }))
         const p = (project ?? []).map((s) => ({ ...s, scope: 'project' as const }))
         const l = (library ?? []).map((s) => ({ ...s, scope: 'library' as const }))
-        setSkills([...g, ...p, ...l])
+        setSkills([...g, ...p, ...l] as any)
       }
     } catch (e: unknown) {
       setError(String(e))

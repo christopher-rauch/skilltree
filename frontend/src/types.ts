@@ -1,3 +1,12 @@
+export interface SkillField {
+  key: string
+  label: string
+  type: 'text' | 'textarea' | 'select' | 'number'
+  options?: string[]
+  default?: string
+  placeholder?: string
+}
+
 export interface Skill {
   name: string
   description: string
@@ -6,6 +15,7 @@ export interface Skill {
   body: string
   scope: 'global' | 'project' | 'library'
   system?: boolean
+  fields?: SkillField[]
 }
 
 export interface FlowNodeData {

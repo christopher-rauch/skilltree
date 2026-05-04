@@ -127,6 +127,50 @@
   cursor: not-allowed;
 }
 
+.node-field-select {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  padding: 3px 20px 3px 7px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text);
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M1 1l3 3 3-3' stroke='%23606060' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 5px center;
+  cursor: pointer;
+  min-width: 0;
+}
+.node-field-select:focus { border-color: var(--primary); outline: none; }
+.node-field-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.node-field-textarea-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0 0 2px;
+}
+
+.node-field-textarea {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text);
+  resize: vertical;
+  min-height: 40px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.node-field-textarea:focus { border-color: var(--primary); outline: none; }
+.node-field-textarea:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* Handle hover — applied via React Flow's .react-flow__handle selector */
 .react-flow__handle:hover {
   background: var(--primary) !important;

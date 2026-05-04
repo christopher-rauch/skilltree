@@ -779,7 +779,14 @@ func (a *App) runNode(ctx context.Context, node FlowNode, claudePath, dir string
 		skillName, _ := node.Data["skillName"].(string)
 		argumentValue, _ := node.Data["argumentValue"].(string)
 		argumentValue = sub(argumentValue)
-		prompt := a.resolveSkillPrompt(skillName, argumentValue)
+		// Collect skill field values and apply variable substitution
+		skillFieldValues := map[string]string{}
+		if raw, ok := node.Data["skillFieldValues"].(map[string]interface{}); ok {
+			for k, v := range raw {
+				skillFieldValues[k] = sub(fmt.Sprint(v))
+			}
+		}
+		prompt := a.resolveSkillPrompt(skillName, argumentValue, skillFieldValues)
 		runErr = a.runClaudePrompt(ctx, claudePath, dir, prompt)
 	}
 
@@ -821,21 +828,64 @@ func (a *App) runShellScript(ctx context.Context, dir, scriptPath string) error 
 	return cmd.Wait()
 }
 
+// fieldsPreamble builds a pre-filled-inputs block prepended to the prompt so
+// Claude uses the values directly without asking the user interactively.
+// Skills remain fully backward-compatible when run outside Skilltree.
+func fieldsPreamble(fieldValues map[string]string, skill Skill) string {
+	if len(fieldValues) == 0 {
+		return ""
+	}
+	var lines []string
+	if len(skill.Fields) > 0 {
+		for _, f := range skill.Fields {
+			if v := strings.TrimSpace(fieldValues[f.Key]); v != "" {
+				lines = append(lines, fmt.Sprintf("- %s: %s", f.Label, v))
+			}
+		}
+	} else {
+		for k, v := range fieldValues {
+			if strings.TrimSpace(v) != "" {
+				lines = append(lines, fmt.Sprintf("- %s: %s", k, v))
+			}
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "The user has already provided the following inputs. " +
+		"Use them directly without asking:\n" + strings.Join(lines, "\n") + "\n\n"
+}
+
 // resolveSkillPrompt returns the prompt to pass to claude -p.
 // Library skills inline their body; global/project skills invoke by name.
-// argumentValue is appended when provided.
-func (a *App) resolveSkillPrompt(skillName, argumentValue string) string {
+// argumentValue and fieldValues are incorporated when provided.
+func (a *App) resolveSkillPrompt(skillName, argumentValue string, fieldValues map[string]string) string {
 	libPath := filepath.Join(a.librarySkillsDir(), skillName, "SKILL.md")
 	if skill, err := parseSkillFile(libPath, "library"); err == nil && skill.Body != "" {
+		pre := fieldsPreamble(fieldValues, skill)
+		body := strings.TrimSpace(skill.Body)
 		if argumentValue != "" {
-			return skill.Body + "\n\nArgument: " + argumentValue
+			body += "\n\nArgument: " + argumentValue
 		}
-		return skill.Body
+		return pre + body
 	}
+	// Global/project skill — invoke by name; prepend field context if provided
+	var prompt string
 	if argumentValue != "" {
-		return "/" + skillName + " " + argumentValue
+		prompt = "/" + skillName + " " + argumentValue
+	} else {
+		prompt = "/" + skillName
 	}
-	return "/" + skillName
+	// Load skill definition to get field labels for the preamble
+	skill := Skill{Name: skillName}
+	for _, dir := range []string{a.globalSkillsDir(), a.projectSkillsDir()} {
+		if s, err := parseSkillFile(filepath.Join(dir, skillName, "SKILL.md"), ""); err == nil {
+			skill = s
+			break
+		}
+	}
+	pre := fieldsPreamble(fieldValues, skill)
+	return pre + prompt
 }
 
 // clStreamEvent is one JSON line from claude -p --output-format stream-json.

@@ -133,7 +133,7 @@ export function SkillEditor({ skill, defaultScope, onClose, onSave }: Props) {
     setScopeChangePrompt(false)
     try {
       const saved: Skill = { name, description, argumentHint, allowedTools, body, scope }
-      await SaveSkill(saved, skill?.name ?? '')
+      await SaveSkill(saved as any, skill?.name ?? '')
       if (removeFromSource && skill) await DeleteSkill(skill.name, skill.scope)
       await onSave(saved)
     } catch (e: unknown) {
